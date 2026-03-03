@@ -1,0 +1,293 @@
+/* --- Fresh-Fetch Professional Theme --- */
+:root {
+  --primary: #27ae60;
+  --secondary: #f39c12;
+  --danger: #e74c3c;
+  --dark: #2c3e50;
+  --light: #f8f9fa;
+  --white: #ffffff;
+  --shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  --text-muted: #95a5a6;
+  --border: #ddd;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", Roboto, sans-serif;
+  background-color: #f0f2f5;
+  color: var(--dark);
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Header Styling */
+.main-header,
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 30px 5%;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 40px;
+  background: rgba(255, 255, 255, 0.95);
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+
+.logo-section {
+  display: flex;
+  flex-direction: column;
+}
+
+h1,
+.logo,
+.logo-text {
+  font-size: 2.5rem;
+  color: var(--primary);
+  font-weight: 800;
+  letter-spacing: -1px;
+  text-decoration: none;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.subtitle {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+.system-status {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Navigation Menu */
+.nav-menu,
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 25px;
+}
+
+.nav-link,
+.nav-links a {
+  color: var(--dark);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.95rem;
+  transition: color 0.2s;
+}
+
+.nav-link:hover,
+.nav-links a:hover {
+  color: var(--primary);
+}
+
+/* Cart Button */
+.cart-btn,
+.cart-link {
+  background: var(--primary);
+  color: var(--white) !important;
+  padding: 8px 18px;
+  border-radius: 50px;
+  text-decoration: none;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: transform 0.2s;
+}
+
+.cart-btn:hover {
+  transform: scale(1.05);
+}
+
+/* Refresh Button */
+.refresh-btn {
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 0.2s,
+    background 0.2s;
+  box-shadow: 0 4px 6px rgba(39, 174, 96, 0.2);
+}
+
+.refresh-btn:hover {
+  background-color: #219150;
+  transform: translateY(-2px);
+}
+
+/* Section Titles */
+h2 {
+  margin-bottom: 20px;
+  font-size: 1.8rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logic-hint {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+  font-style: italic;
+}
+
+/* Product Grid */
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 25px;
+  padding: 2rem 5%;
+}
+
+/* General Card Styling */
+.card {
+  background: var(--white);
+  border-radius: 16px;
+  padding: 20px;
+  position: relative;
+  transition: all 0.3s ease;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.card:hover {
+  transform: translateY(-8px);
+  box-shadow: var(--shadow);
+}
+
+/* Smart Deal Card (Use Case 5) */
+.deal-card {
+  border: 2px solid var(--secondary);
+  background: linear-gradient(180deg, #fffdf5 0%, #ffffff 100%);
+  box-shadow: 0 10px 20px rgba(243, 156, 18, 0.1);
+}
+
+/* Badges */
+.badge-expiry {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background-color: var(--danger);
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 900;
+  padding: 4px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+}
+
+/* Pricing Logic */
+.price-container {
+  margin: 15px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.old-price {
+  text-decoration: line-through;
+  color: #bdc3c7;
+  font-size: 1.1rem;
+}
+
+.current-price {
+  color: var(--primary);
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+.savings-tag {
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 15px;
+}
+
+/* Action Buttons */
+.add-btn,
+.pay-btn {
+  width: 100%;
+  padding: 12px;
+  margin-top: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--primary);
+  background: transparent;
+  color: var(--primary);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-btn:hover {
+  background: var(--primary);
+  color: white;
+}
+
+/* Checkout / Payment Gateway */
+.payment-gateway {
+  max-width: 500px;
+  margin: 3rem auto;
+  padding: 2.5rem;
+  background: var(--white);
+  border-radius: 30px;
+  border: 2px dashed #ccc;
+  text-align: center;
+}
+
+.payment-gateway input {
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--dark);
+  padding: 15px;
+  width: 100%;
+  border-radius: 8px;
+  margin: 1.5rem 0;
+  font-size: 1rem;
+}
+
+/* Status Messages */
+.status-msg {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 50px;
+  background: #fff;
+  border-radius: 12px;
+  border: 2px dashed #ccc;
+  color: var(--text-muted);
+}
+
+/* Footer */
+footer {
+  text-align: center;
+  margin-top: 60px;
+  padding: 30px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
