@@ -1,10 +1,23 @@
 from django.urls import path
-from .views import CustomerDealZone, PlaceOrderView # Ensure you import the view
+from .views import (
+    CustomerDealZone, 
+    PlaceOrderView, 
+    LoginView, 
+    RegisterView,
+    MyOrdersView
+)
 
 urlpatterns = [
-    # Existing deals endpoint
+    # Marketplace and Deals
     path('deals/', CustomerDealZone.as_view(), name='customer-deals'),
     
-    # ADD THIS LINE to resolve the 404 error
+    # Checkout and Payment
     path('place-order/', PlaceOrderView.as_view(), name='place-order'),
+
+    # Orders
+    path('my-orders/', MyOrdersView.as_view(), name='my-orders'),
+
+    # Authentication & Role-Based Access
+    path('login/', LoginView.as_view(), name='login'),
+    path('register/', RegisterView.as_view(), name='register'),
 ]

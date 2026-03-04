@@ -28,7 +28,8 @@ SECRET_KEY = 'django-insecure-c(h%w22cbhjd#i!&&&m%#0o+f5)r9+!o+a!f3v3hblo8he1p%z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# during development allow localhost and the test client
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
 
 
 # Application definition
@@ -45,8 +46,7 @@ INSTALLED_APPS = [
     'customers',
     'corsheaders',
     'rest_framework',
-
-
+    'rest_framework.authtoken',
 ]
 
 MIDDLEWARE = [
@@ -139,3 +139,15 @@ CORS_ALLOWED_ORIGINS = [
 
 # Allow credentials (cookies/auth) from the frontend when needed
 CORS_ALLOW_CREDENTIALS = True
+
+# REST Framework Configuration
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+}
+
+# Default authentication backend (uses the custom User model via AUTH_USER_MODEL)
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',  # Uses AUTH_USER_MODEL
+]

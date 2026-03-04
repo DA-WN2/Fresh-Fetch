@@ -7,9 +7,23 @@ const Orders = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Fetching from your Django backend API
+    // Get token from localStorage
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      console.error("No auth token found");
+      setLoading(false);
+      return;
+    }
+
+    // Fetching from your Django backend API with auth header
     axios
-      .get("http://127.0.0.1:8000/api/customer/my-orders/")
+      .get("http://127.0.0.1:8000/api/customer/my-orders/", {
+        headers: {
+          Authorization: `Token ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
       .then((res) => {
         setOrders(res.data);
         setLoading(false);

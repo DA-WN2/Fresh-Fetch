@@ -6,6 +6,15 @@ db.sqlite3
 venv/
 env/
 
+# Test/Debug files
+test_*.py
+check_*.py
+server.log
+server_error.log
+*.html
+*_error.html
+*_FIX.md
+
 # React / Node
 node_modules/
 dist/

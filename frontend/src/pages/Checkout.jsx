@@ -8,8 +8,9 @@ const Checkout = ({ cart, setCart }) => {
   const [method, setMethod] = useState("card");
   const navigate = useNavigate();
 
+  // FIX: Ensure prices are treated as Numbers to avoid concatenation errors
   const total = cart.reduce(
-    (acc, it) => acc + Number(it.current_price || 0),
+    (acc, it) => acc + (Number(it.current_price) || 0) * (it.quantity || 1),
     0,
   );
 
@@ -20,169 +21,317 @@ const Checkout = ({ cart, setCart }) => {
     }
 
     setPaying(true);
+    const token = localStorage.getItem("token");
 
-    setTimeout(async () => {
-      try {
-        const res = await axios.post(
-          "http://127.0.0.1:8000/api/customer/place-order/",
-          { items: cart },
-          { headers: { "Content-Type": "application/json" } },
-        );
+    try {
+      // FIX: Removed setTimeout. Real apps should call the API immediately.
+      const res = await axios.post(
+        "http://127.0.0.1:8000/api/customer/place-order/",
+        { items: cart },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: token ? `Token ${token}` : "",
+          },
+        },
+      );
 
-        // success
-        setPaying(false);
-        setCart([]);
-        alert("Payment Successful! Inventory updated in MySQL.");
-        navigate("/orders");
-      } catch (err) {
-        // Better error reporting for debugging
-        console.error("Payment Error:", err);
-        let message = "Payment Failed. Please try again.";
-        if (err.response) {
-          // Server responded with non-2xx
-          const status = err.response.status;
-          const data = err.response.data;
-          message =
-            `Payment failed (status ${status})` +
-            (data?.detail ? `: ${data.detail}` : "");
-        } else if (err.request) {
-          // Request made but no response
-          message = "No response from server. Is the backend running?";
-        } else if (err.message) {
-          message = err.message;
-        }
-        alert(message);
-        setPaying(false);
+      setPaying(false);
+      setCart([]); // Clear global cart state
+      alert("Payment Successful! Your order has been placed.");
+      navigate("/orders");
+    } catch (err) {
+      console.error("Payment Error:", err);
+      setPaying(false);
+
+      let message = "Payment Failed. Please try again.";
+      if (err.response) {
+        const { status, data } = err.response;
+        if (status === 403) message = "Please login to complete purchase.";
+        else if (data.error) message = data.error;
       }
-    }, 1800);
+      alert(message);
+    }
   };
 
   return (
     <div className="checkout-container">
-      <div className="checkout-header">
-        <div className="brand">
-          <div className="brand-badge">FF</div>
-          <div>
-            <h2>Secure Payment Gateway</h2>
-            <div className="checkout-note">
-              🔒 256-bit third-party encryption enabled
-            </div>
+      <div className="payment-gateway">
+        {/* Header Section */}
+        <div
+          className="brand"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "15px",
+            marginBottom: "2rem",
+          }}
+        >
+          <div
+            className="brand-badge"
+            style={{
+              background: "var(--primary)",
+              color: "white",
+              padding: "10px 15px",
+              borderRadius: "8px",
+              fontWeight: "800",
+            }}
+          >
+            FF
+          </div>
+          <div style={{ textAlign: "left" }}>
+            <h2 style={{ margin: 0, color: "var(--text-main)" }}>
+              Secure Checkout
+            </h2>
+            <small style={{ color: "var(--text-muted)" }}>
+              🔒 Verified 256-bit Encryption
+            </small>
           </div>
         </div>
-        <div className="checkout-actions">
-          <Link to="/cart" className="pm-tab">
-            Back to Cart
-          </Link>
-        </div>
-      </div>
 
-      <div className="accent-line" />
-
-      <div className="checkout-grid">
-        <div className="checkout-form">
-          <div className="payment-methods">
+        <div
+          className="checkout-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.5fr 1fr",
+            gap: "40px",
+          }}
+        >
+          {/* Payment Form */}
+          <div className="checkout-form">
             <div
-              className={`pm-tab ${method === "card" ? "active" : ""}`}
-              onClick={() => setMethod("card")}
+              className="payment-methods"
+              style={{ display: "flex", gap: "10px", marginBottom: "2rem" }}
             >
-              Card
-            </div>
-            <div
-              className={`pm-tab ${method === "upi" ? "active" : ""}`}
-              onClick={() => setMethod("upi")}
-            >
-              UPI
-            </div>
-            <div
-              className={`pm-tab ${method === "wallet" ? "active" : ""}`}
-              onClick={() => setMethod("wallet")}
-            >
-              Wallet
-            </div>
-          </div>
-
-          {method === "card" && (
-            <>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Name on Card</label>
-                  <input type="text" placeholder="Full name" />
-                </div>
-                <div className="form-group">
-                  <label>Card Number</label>
-                  <input type="text" placeholder="1234 5678 9012 3456" />
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Expiry</label>
-                  <input type="text" placeholder="MM/YY" />
-                </div>
-                <div className="form-group">
-                  <label>CVV</label>
-                  <input type="password" placeholder="***" />
-                </div>
-              </div>
-
-              <div className="form-actions">
+              {["card", "upi", "wallet"].map((m) => (
                 <button
-                  className="pay-btn"
-                  onClick={handlePayment}
-                  disabled={paying}
+                  key={m}
+                  onClick={() => setMethod(m)}
+                  style={{
+                    flex: 1,
+                    padding: "10px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    background: method === m ? "var(--primary)" : "white",
+                    color: method === m ? "white" : "var(--text-main)",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    transition: "0.3s",
+                  }}
                 >
-                  {paying ? "Processing..." : `Pay ₹${total.toFixed(2)}`}
+                  {m.toUpperCase()}
                 </button>
+              ))}
+            </div>
+
+            {method === "card" ? (
+              <div style={{ textAlign: "left" }}>
+                <div style={{ marginBottom: "1rem" }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontWeight: "700",
+                      marginBottom: "5px",
+                    }}
+                  >
+                    Cardholder Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                    }}
+                  />
+                </div>
+                <div style={{ marginBottom: "1rem" }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontWeight: "700",
+                      marginBottom: "5px",
+                    }}
+                  >
+                    Card Number
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="xxxx xxxx xxxx xxxx"
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                    }}
+                  />
+                </div>
+                <div style={{ display: "flex", gap: "15px" }}>
+                  <div style={{ flex: 1 }}>
+                    <label
+                      style={{
+                        display: "block",
+                        fontWeight: "700",
+                        marginBottom: "5px",
+                      }}
+                    >
+                      Expiry
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="MM/YY"
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                      }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label
+                      style={{
+                        display: "block",
+                        fontWeight: "700",
+                        marginBottom: "5px",
+                      }}
+                    >
+                      CVV
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="***"
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
-            </>
-          )}
+            ) : (
+              <div
+                style={{
+                  padding: "40px",
+                  background: "#f1f5f9",
+                  borderRadius: "12px",
+                  color: "var(--text-muted)",
+                  textAlign: "center",
+                }}
+              >
+                {method === "upi"
+                  ? "Scan QR Code on the next screen..."
+                  : "Wallet selection will open in a new window..."}
+              </div>
+            )}
 
-          {method === "upi" && (
-            <div className="checkout-note">
-              Scan this QR with your UPI app to pay (mock)
-            </div>
-          )}
+            <button
+              className="pay-btn"
+              onClick={handlePayment}
+              disabled={paying || cart.length === 0}
+              style={{
+                width: "100%",
+                marginTop: "2rem",
+                padding: "15px",
+                background: cart.length === 0 ? "#ccc" : "var(--primary)",
+                color: "white",
+                border: "none",
+                borderRadius: "12px",
+                fontWeight: "800",
+                cursor: cart.length === 0 ? "not-allowed" : "pointer",
+              }}
+            >
+              {paying
+                ? "Processing Transaction..."
+                : `Confirm & Pay ₹${total.toFixed(2)}`}
+            </button>
 
-          {method === "wallet" && (
-            <div className="checkout-note">
-              Choose your wallet and confirm the payment (mock)
+            <Link
+              to="/cart"
+              style={{
+                display: "block",
+                marginTop: "1rem",
+                color: "var(--text-muted)",
+                textDecoration: "none",
+                fontSize: "0.9rem",
+                textAlign: "center",
+              }}
+            >
+              ← Return to Cart
+            </Link>
+          </div>
+
+          {/* Order Summary Sidebar */}
+          <aside
+            className="checkout-summary"
+            style={{
+              background: "white",
+              padding: "20px",
+              borderRadius: "20px",
+              border: "1px solid var(--border)",
+              alignSelf: "start",
+            }}
+          >
+            <h3
+              style={{
+                borderBottom: "1px solid var(--border)",
+                paddingBottom: "10px",
+                marginBottom: "15px",
+                textAlign: "left",
+              }}
+            >
+              Order Summary
+            </h3>
+            {cart.length > 0 ? (
+              cart.map((it) => (
+                <div
+                  key={it.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: "10px",
+                    fontSize: "0.95rem",
+                  }}
+                >
+                  <span>
+                    {it.name}{" "}
+                    <small style={{ color: "#888" }}>
+                      (x{it.quantity || 1})
+                    </small>
+                  </span>
+                  <span style={{ fontWeight: "700" }}>
+                    ₹
+                    {(Number(it.current_price) * (it.quantity || 1)).toFixed(2)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                No items in summary.
+              </p>
+            )}
+
+            <div
+              style={{
+                borderTop: "2px solid var(--border)",
+                marginTop: "15px",
+                paddingTop: "15px",
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "1.2rem",
+                fontWeight: "800",
+                color: "var(--primary)",
+              }}
+            >
+              <span>Total</span>
+              <span>₹{total.toFixed(2)}</span>
             </div>
-          )}
+          </aside>
         </div>
-
-        <aside className="checkout-summary">
-          <div className="summary-title">Order Summary</div>
-          {cart.length === 0 ? (
-            <div className="checkout-note">Your cart is empty.</div>
-          ) : (
-            cart.map((it) => (
-              <div className="summary-item" key={it.cartId || it.id}>
-                {it.image ? (
-                  <img src={it.image} alt={it.name} />
-                ) : (
-                  <img src="/placeholder-56.png" alt="item" />
-                )}
-                <div className="meta">
-                  <strong>{it.name}</strong>
-                  <small>Qty: {it.quantity || 1}</small>
-                </div>
-                <div style={{ marginLeft: "auto", fontWeight: 800 }}>
-                  ₹{Number(it.current_price).toFixed(2)}
-                </div>
-              </div>
-            ))
-          )}
-
-          <div className="summary-row">
-            <div className="note"></div>
-            <div />
-          </div>
-
-          <div className="total">
-            <div>Total</div>
-            <div>₹{total.toFixed(2)}</div>
-          </div>
-        </aside>
       </div>
     </div>
   );
