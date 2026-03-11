@@ -4,7 +4,6 @@ from .views import dashboard_redirect
 from django.conf import settings
 from django.conf.urls.static import static
 
-
 # Import all Manager views including the new analytics tools
 from inventory.views import (
     ManagerInventoryView, 
@@ -13,7 +12,7 @@ from inventory.views import (
     RunPricingEngineView,
     ReportAuditView,
     EnvironmentalImpactView,
-    SupplierReliabilityView,
+    SupplierScoresView,  # <-- FIXED: This is required for the Manager Dropdown!
     TriggerRestockView,
     ManagerProductDetailView,
     CustomerCheckoutView,
@@ -25,7 +24,10 @@ from inventory.views import (
     UploadPackingPhotoView,
     DeliveryOrdersView, 
     DeliveryUpdateStatusView,
-    AvailableDeliveryAgentsView, AssignDeliveryAgentView
+    AvailableDeliveryAgentsView, 
+    AssignDeliveryAgentView,
+    SupplierRestockOrdersView, 
+    UpdateRestockOrderStatusView
 )
 
 urlpatterns = [
@@ -33,7 +35,6 @@ urlpatterns = [
     
     # Use Case: Role-Based Entry Point
     path('dashboard/', dashboard_redirect, name='dashboard_redirect'),
-    
     
     # App-specific URLs
     path('api/inventory/', include('inventory.urls')),
@@ -57,16 +58,19 @@ urlpatterns = [
     
     # NEW: Analytics & Sustainability Reporting
     path('api/manager/impact-report/', EnvironmentalImpactView.as_view(), name='impact-report'),
-    path('api/manager/supplier-scores/', SupplierReliabilityView.as_view(), name='supplier-scores'),
+    path('api/manager/supplier-scores/', SupplierScoresView.as_view(), name='supplier-scores'), # <-- FIXED
     path('api/manager/trigger-restock/', TriggerRestockView.as_view(), name='trigger-restock'),
 
-
     path('api/manager/inventory/<int:pk>/', ManagerProductDetailView.as_view(), name='manager-product-detail'),
+
+    # Supplier 
+    path('api/supplier/orders/', SupplierRestockOrdersView.as_view(), name='supplier-orders'),
+    path('api/supplier/update-order/<int:order_id>/', UpdateRestockOrderStatusView.as_view(), name='supplier-update-order'),
     
     # Built-in Login/Logout views
     path('accounts/', include('django.contrib.auth.urls')),
 
-    #delivery 
+    # Delivery 
     path('api/delivery/orders/', DeliveryOrdersView.as_view(), name='delivery-orders'),
     path('api/delivery/update-order/<int:order_id>/', DeliveryUpdateStatusView.as_view(), name='delivery-update'), 
     path('api/manager/delivery-agents/', AvailableDeliveryAgentsView.as_view(), name='delivery-agents'),

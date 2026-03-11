@@ -29,13 +29,13 @@ class Category(models.Model):
 
 # --- 3. SUPPLIER RELIABILITY ---
 class Supplier(models.Model):
-    name = models.CharField(max_length=150)
-    contact_email = models.EmailField()
-    reliability_score = models.FloatField(default=10.0) 
+    # --- ADD THIS LINE so a supplier can log in! ---
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='supplier_profile')
+    
+    name = models.CharField(max_length=255)
+    contact_email = models.EmailField(blank=True, null=True)
+    reliability_score = models.FloatField(default=10.0)
     quality_rating = models.FloatField(default=5.0)
-
-    def __str__(self):
-        return f"{self.name} (Score: {self.reliability_score})"
 
 # --- 4. PRODUCT ---
 class Product(models.Model):
@@ -127,3 +127,4 @@ class RestockOrder(models.Model):
     actual_delivery = models.DateField(null=True, blank=True)
     quality_received = models.IntegerField(choices=[(i, i) for i in range(1, 6)], null=True, blank=True)
     is_completed = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, default="Pending")

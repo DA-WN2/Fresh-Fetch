@@ -13,7 +13,9 @@ import {
   Send,
   X,
   Gift,
-  Camera, // NEW: Imported the Camera icon
+  Camera,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import "../styles/Marketplace.css";
 
@@ -22,6 +24,7 @@ const Orders = () => {
   const [loading, setLoading] = useState(true);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
 
+  // Transfer Modal State
   const [transferModal, setTransferModal] = useState({
     show: false,
     orderId: null,
@@ -32,9 +35,26 @@ const Orders = () => {
   });
   const [transferring, setTransferring] = useState(false);
 
+  // --- NEW: Cancel Confirmation Modal State ---
+  const [cancelModal, setCancelModal] = useState({
+    show: false,
+    orderId: null,
+  });
+  const [cancelling, setCancelling] = useState(false);
+
+  // Custom In-App Messaging State
+  const [appMessage, setAppMessage] = useState({ text: "", type: "" });
+
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  const showMessage = (text, type = "error") => {
+    setAppMessage({ text, type });
+    setTimeout(() => {
+      setAppMessage({ text: "", type: "" });
+    }, 4000);
+  };
 
   const fetchOrders = async () => {
     const token = localStorage.getItem("token");
@@ -61,30 +81,35 @@ const Orders = () => {
     }
   };
 
-  const handleCancelOrder = async (orderId) => {
-    const confirmCancel = window.confirm(
-      "Are you sure you want to cancel this order?",
-    );
-    if (!confirmCancel) return;
+  // --- NEW: Execute Cancel Order (Triggered from Custom Modal) ---
+  const executeCancelOrder = async () => {
+    if (!cancelModal.orderId) return;
 
+    setCancelling(true);
     const token = localStorage.getItem("token");
+
     try {
       await axios.post(
-        `http://127.0.0.1:8000/api/customer/cancel-order/${orderId}/`,
+        `http://127.0.0.1:8000/api/customer/cancel-order/${cancelModal.orderId}/`,
         {},
-        {
-          headers: { Authorization: `Token ${token}` },
-        },
+        { headers: { Authorization: `Token ${token}` } },
       );
+      showMessage("Order cancelled successfully.", "success");
+      setCancelModal({ show: false, orderId: null });
       fetchOrders();
     } catch (err) {
-      alert("Failed to cancel order.");
+      showMessage(
+        err.response?.data?.error || "Failed to cancel order.",
+        "error",
+      );
+    } finally {
+      setCancelling(false);
     }
   };
 
   const handleTransferSubmit = async () => {
     if (!transferData.username || !transferData.address) {
-      alert("Please fill in both fields.");
+      showMessage("Please fill in both fields.", "error");
       return;
     }
 
@@ -98,14 +123,18 @@ const Orders = () => {
         { headers: { Authorization: `Token ${token}` } },
       );
 
-      alert(`Successfully transferred to ${transferData.username}!`);
+      showMessage(
+        `Successfully transferred to ${transferData.username}!`,
+        "success",
+      );
       setTransferModal({ show: false, orderId: null });
       setTransferData({ username: "", address: "" });
       fetchOrders();
     } catch (err) {
-      alert(
+      showMessage(
         err.response?.data?.error ||
           "Transfer failed. Please check the username.",
+        "error",
       );
     } finally {
       setTransferring(false);
@@ -135,8 +164,143 @@ const Orders = () => {
 
   return (
     <div
-      style={{ maxWidth: "1000px", margin: "3rem auto", padding: "0 1.5rem" }}
+      style={{
+        maxWidth: "1000px",
+        margin: "3rem auto",
+        padding: "0 1.5rem",
+        position: "relative",
+      }}
     >
+      {/* --- IN-APP NOTIFICATION BANNER --- */}
+      {appMessage.text && (
+        <div
+          style={{
+            position: "fixed",
+            top: "20px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor:
+              appMessage.type === "error" ? "#fee2e2" : "#d1fae5",
+            color: appMessage.type === "error" ? "#ef4444" : "#10b981",
+            border: `1px solid ${appMessage.type === "error" ? "#fca5a5" : "#6ee7b7"}`,
+            padding: "12px 24px",
+            borderRadius: "8px",
+            boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            fontWeight: "bold",
+            animation: "fadeIn 0.3s ease-in-out",
+          }}
+        >
+          {appMessage.type === "error" ? (
+            <AlertTriangle size={20} />
+          ) : (
+            <CheckCircle2 size={20} />
+          )}
+          {appMessage.text}
+        </div>
+      )}
+
+      {/* --- CUSTOM CANCEL CONFIRMATION MODAL --- */}
+      {cancelModal.show && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 23, 42, 0.7)",
+            zIndex: 3000,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              padding: "2rem",
+              borderRadius: "12px",
+              width: "100%",
+              maxWidth: "400px",
+              boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                background: "#fee2e2",
+                width: "50px",
+                height: "50px",
+                borderRadius: "50%",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                margin: "0 auto 1rem auto",
+              }}
+            >
+              <AlertTriangle color="#ef4444" size={28} />
+            </div>
+            <h3
+              style={{
+                margin: "0 0 0.5rem 0",
+                color: "var(--text-main)",
+                fontSize: "1.2rem",
+              }}
+            >
+              Cancel Order #{cancelModal.orderId}?
+            </h3>
+            <p
+              style={{
+                color: "var(--text-muted)",
+                fontSize: "0.9rem",
+                marginBottom: "1.5rem",
+              }}
+            >
+              This action cannot be undone. Are you sure you want to cancel this
+              order and refund the items to the store?
+            </p>
+
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                onClick={() => setCancelModal({ show: false, orderId: null })}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background: "white",
+                  color: "var(--text-main)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "6px",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                }}
+              >
+                No, Keep it
+              </button>
+              <button
+                onClick={executeCancelOrder}
+                disabled={cancelling}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  background: "var(--danger)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "6px",
+                  fontWeight: "600",
+                  cursor: cancelling ? "not-allowed" : "pointer",
+                }}
+              >
+                {cancelling ? "Cancelling..." : "Yes, Cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- TRANSFER MODAL --- */}
       {transferModal.show && (
         <div
@@ -535,7 +699,7 @@ const Orders = () => {
                     </div>
                   )}
 
-                  {/* ACTION BAR WITH TRANSFER BUTTON */}
+                  {/* ACTION BAR WITH CANCEL AND TRANSFER BUTTONS */}
                   <div
                     style={{
                       display: "flex",
@@ -551,7 +715,8 @@ const Orders = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleCancelOrder(order.id);
+                              // TRIGGER NEW CUSTOM MODAL HERE
+                              setCancelModal({ show: true, orderId: order.id });
                             }}
                             style={{
                               background: "white",
@@ -884,7 +1049,7 @@ const Orders = () => {
                           </p>
                         </div>
 
-                        {/* --- NEW: PACKING SNAPSHOT BLOCK --- */}
+                        {/* PACKING SNAPSHOT BLOCK */}
                         {order.packing_photo && (
                           <div
                             style={{

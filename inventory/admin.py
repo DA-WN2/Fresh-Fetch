@@ -1,8 +1,8 @@
 from django.contrib import admin
 from django.utils.html import format_html
 
-# 1. Import all the newly updated models
-from .models import Product, Category, Store, Order, OrderItem
+# 1. Import all the newly updated models (Including Supplier and RestockOrder)
+from .models import Product, Category, Store, Order, OrderItem, Supplier, RestockOrder
 
 # 2. Register the core models to the Admin panel
 admin.site.register(Category)
@@ -76,3 +76,14 @@ class ProductAdmin(admin.ModelAdmin):
         return priority
     
     get_delivery_priority.short_description = 'Logistics Priority'
+
+# --- NEW: SUPPLIER & RESTOCK ORDER REGISTRATION ---
+
+@admin.register(Supplier)
+class SupplierAdmin(admin.ModelAdmin):
+    list_display = ('name', 'user', 'reliability_score', 'quality_rating')
+
+@admin.register(RestockOrder)
+class RestockOrderAdmin(admin.ModelAdmin):
+    list_display = ('id', 'supplier', 'product', 'quantity', 'status', 'expected_delivery')
+    list_filter = ('status', 'supplier')

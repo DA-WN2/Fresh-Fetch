@@ -18,9 +18,10 @@ import Register from "./pages/Register";
 import Profile from "./pages/Profile";
 import ProductPage from "./pages/ProductPage";
 
-// Dashboards
+// Enterprise Dashboards
 import ManagerDashboard from "./pages/ManagerDashboard";
-import DeliveryDashboard from "./pages/DeliveryDashboard"; // Make sure this is imported!
+import DeliveryDashboard from "./pages/DeliveryDashboard";
+import SupplierDashboard from "./pages/SupplierDashboard";
 
 function App() {
   // --- GLOBAL STATE ---
@@ -93,9 +94,8 @@ function App() {
             1. ENTERPRISE APPS (FULL SCREEN, NO NAVBAR)
             ========================================= */}
         <Route path="/manager-dashboard" element={<ManagerDashboard />} />
-
-        {/* THIS IS THE FIX: The exact URL matching Login.jsx */}
         <Route path="/delivery-portal" element={<DeliveryDashboard />} />
+        <Route path="/supplier-inventory" element={<SupplierDashboard />} />
 
         {/* =========================================
             2. CUSTOMER APP (WITH NAVBAR & CONTAINER)

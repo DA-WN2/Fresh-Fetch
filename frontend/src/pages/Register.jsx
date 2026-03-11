@@ -23,10 +23,11 @@ const Register = () => {
     username: "",
     email: "",
     password: "",
-    phone_number: "", // NEW: Added phone number to state
+    phone_number: "", 
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState(""); // NEW: Success state
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -37,32 +38,33 @@ const Register = () => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setSuccess("");
 
     try {
       const csrfToken = getCookie("csrftoken");
-
-      // Update this URL if your register endpoint is different!
-      await axios.post(
-        "http://127.0.0.1:8000/api/customer/register/",
-        formData,
-        {
-          headers: {
-            "Content-Type": "application/json",
-            ...(csrfToken && { "X-CSRFToken": csrfToken }),
-          },
+      
+      await axios.post("http://127.0.0.1:8000/api/customer/register/", formData, {
+        headers: {
+          "Content-Type": "application/json",
+          ...(csrfToken && { "X-CSRFToken": csrfToken }),
         },
-      );
+      });
 
-      alert("Registration successful! Please login.");
-      navigate("/login");
+      // Show in-app success message instead of browser alert
+      setSuccess("Registration successful! Redirecting to login...");
+      
+      // Delay the redirect by 2 seconds so the user can read the message
+      setTimeout(() => {
+        navigate("/login");
+      }, 2000);
+
     } catch (err) {
       console.error("Registration Error:", err);
       setError(
-        err.response?.data?.error || "Registration failed. Please try again.",
+        err.response?.data?.error || "Registration failed. Please try again."
       );
-    } finally {
-      setLoading(false);
-    }
+      setLoading(false); // Only stop loading if there is an error
+    } 
   };
 
   return (
@@ -71,6 +73,7 @@ const Register = () => {
         <h2>Create an Account</h2>
         <p className="auth-subtitle">Join Fresh-Fetch today</p>
 
+        {/* ERROR BANNER */}
         {error && (
           <div
             style={{
@@ -81,9 +84,29 @@ const Register = () => {
               marginBottom: "15px",
               fontWeight: "bold",
               fontSize: "0.9rem",
+              textAlign: "center"
             }}
           >
             {error}
+          </div>
+        )}
+
+        {/* SUCCESS BANNER */}
+        {success && (
+          <div
+            style={{
+              background: "#d1fae5",
+              color: "#10b981",
+              border: "1px solid #6ee7b7",
+              padding: "10px",
+              borderRadius: "8px",
+              marginBottom: "15px",
+              fontWeight: "bold",
+              fontSize: "0.9rem",
+              textAlign: "center"
+            }}
+          >
+            {success}
           </div>
         )}
 
@@ -97,6 +120,7 @@ const Register = () => {
               value={formData.username}
               onChange={handleChange}
               required
+              disabled={loading}
             />
           </div>
 
@@ -109,10 +133,10 @@ const Register = () => {
               value={formData.email}
               onChange={handleChange}
               required
+              disabled={loading}
             />
           </div>
 
-          {/* --- NEW: PHONE NUMBER FIELD --- */}
           <div className="auth-input-group">
             <label>Contact Number</label>
             <input
@@ -122,6 +146,7 @@ const Register = () => {
               value={formData.phone_number}
               onChange={handleChange}
               required
+              disabled={loading}
             />
           </div>
 
@@ -134,11 +159,12 @@ const Register = () => {
               value={formData.password}
               onChange={handleChange}
               required
+              disabled={loading}
             />
           </div>
 
           <button type="submit" className="auth-btn" disabled={loading}>
-            {loading ? "Creating Account..." : "Sign Up"}
+            {loading && !success ? "Creating Account..." : success ? "Redirecting..." : "Sign Up"}
           </button>
         </form>
 

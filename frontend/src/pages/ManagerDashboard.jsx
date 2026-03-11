@@ -20,13 +20,33 @@ import {
   AlertTriangle,
   MapPin,
   User,
-  Phone, // NEW: Imported the Phone icon for contact info
+  Phone,
 } from "lucide-react";
 import "../styles/ManagerDashboard.css";
 
 const ManagerDashboard = () => {
   const [activeTab, setActiveTab] = useState("OVERVIEW");
-  const [notifications, setNotifications] = useState([]);
+
+  // --- FIX 2: SAVE ACTIVITY LOG TO LOCAL STORAGE ---
+  const [notifications, setNotifications] = useState(() => {
+    const saved = localStorage.getItem("manager_notifications");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  // Keep LocalStorage synced whenever notifications change
+  useEffect(() => {
+    localStorage.setItem(
+      "manager_notifications",
+      JSON.stringify(notifications),
+    );
+  }, [notifications]);
 
   // WASTE REPORT STATE
   const [wasteReport, setWasteReport] = useState([]);
@@ -42,6 +62,8 @@ const ManagerDashboard = () => {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const [restockForms, setRestockForms] = useState({});
+
   // --- 2. MODAL STATES ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -56,6 +78,8 @@ const ManagerDashboard = () => {
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState(null);
+
+  // Stores the IDs of products that have active orders
   const [reorderedItems, setReorderedItems] = useState([]);
 
   // --- 3. API CALLS ---
@@ -110,6 +134,15 @@ const ManagerDashboard = () => {
       setImpactData(impactRes.data);
       setSuppliers(suppRes.data);
       setAgents(agentsRes.data);
+
+      // --- FIX 1: POPULATE REORDERED ITEMS FROM BACKEND ---
+      // The backend now tells us if an item is already pending delivery!
+      const activeRestocks = invRes.data
+        .filter((item) => item.is_reordered)
+        .map((item) => item.id);
+
+      setReorderedItems(activeRestocks);
+
       setLoading(false);
     } catch (error) {
       console.error("Dashboard Load Error", error);
@@ -161,14 +194,14 @@ const ManagerDashboard = () => {
           formData,
           { headers },
         );
-        setNotifications([
+        setNotifications((prev) => [
           {
             id: Date.now(),
             time: "Just now",
             message: `${formData.name} updated.`,
             type: "success",
           },
-          ...notifications,
+          ...prev,
         ]);
       } else {
         await axios.post(
@@ -176,14 +209,14 @@ const ManagerDashboard = () => {
           formData,
           { headers },
         );
-        setNotifications([
+        setNotifications((prev) => [
           {
             id: Date.now(),
             time: "Just now",
             message: `${formData.name} added to catalog.`,
             type: "success",
           },
-          ...notifications,
+          ...prev,
         ]);
       }
       setIsModalOpen(false);
@@ -209,14 +242,14 @@ const ManagerDashboard = () => {
           headers: { Authorization: `Token ${token}` },
         },
       );
-      setNotifications([
+      setNotifications((prev) => [
         {
           id: Date.now(),
           time: "Just now",
           message: `${productToDelete.name} deleted.`,
           type: "alert",
         },
-        ...notifications,
+        ...prev,
       ]);
       setIsDeleteModalOpen(false);
       setProductToDelete(null);
@@ -274,14 +307,14 @@ const ManagerDashboard = () => {
         { headers: { Authorization: `Token ${token}` } },
       );
       const type = res.data.discrepancy > 0 ? "alert" : "success";
-      setNotifications([
+      setNotifications((prev) => [
         {
           id: Date.now(),
           time: "Just now",
           message: `Audit: ${res.data.product_name} discrepancy of ${res.data.discrepancy} recorded.`,
           type,
         },
-        ...notifications,
+        ...prev,
       ]);
       fetchDashboardData();
     } catch (err) {
@@ -298,14 +331,14 @@ const ManagerDashboard = () => {
         { headers: { Authorization: `Token ${token}` } },
       );
 
-      setNotifications([
+      setNotifications((prev) => [
         {
           id: Date.now(),
           time: "Just now",
           message: `Order #${orderId} marked as ${newStatus}.`,
           type: "success",
         },
-        ...notifications,
+        ...prev,
       ]);
       fetchDashboardData();
     } catch (err) {
@@ -313,24 +346,46 @@ const ManagerDashboard = () => {
     }
   };
 
-  const handleReorder = async (productId) => {
+  // --- RESTOCK FORM HANDLERS ---
+  const handleRestockChange = (productId, field, value) => {
+    setRestockForms((prev) => ({
+      ...prev,
+      [productId]: {
+        ...prev[productId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleReorder = async (product) => {
     const token = localStorage.getItem("token");
+
+    const formState = restockForms[product.id] || {};
+    const qty = parseInt(formState.quantity) || 50;
+    const suppId =
+      formState.supplier_id || (suppliers.length > 0 ? suppliers[0].id : null);
+
+    if (!suppId) {
+      alert("No suppliers available in the system!");
+      return;
+    }
+
     try {
       const res = await axios.post(
         "http://127.0.0.1:8000/api/manager/trigger-restock/",
-        { product_id: productId, quantity: 50 },
+        { product_id: product.id, quantity: qty, supplier_id: suppId },
         { headers: { Authorization: `Token ${token}` } },
       );
-      setNotifications([
+      setNotifications((prev) => [
         {
           id: Date.now(),
           time: "Just now",
           message: res.data.message,
           type: "success",
         },
-        ...notifications,
+        ...prev,
       ]);
-      setReorderedItems((prev) => [...prev, productId]);
+      setReorderedItems((prev) => [...prev, product.id]);
       fetchDashboardData();
     } catch (err) {
       alert(err.response?.data?.error || "Reorder failed.");
@@ -386,14 +441,14 @@ const ManagerDashboard = () => {
         { agent_id: agentId },
         { headers: { Authorization: `Token ${token}` } },
       );
-      setNotifications([
+      setNotifications((prev) => [
         {
           id: Date.now(),
           time: "Just now",
           message: res.data.message,
           type: "success",
         },
-        ...notifications,
+        ...prev,
       ]);
       fetchDashboardData();
     } catch (err) {
@@ -506,59 +561,189 @@ const ManagerDashboard = () => {
                       style={{
                         display: "flex",
                         flexDirection: "column",
-                        gap: "12px",
+                        gap: "16px",
                       }}
                     >
                       {inventory
                         .filter((i) => i.stock_quantity <= 5)
-                        .map((item) => (
-                          <div
-                            key={item.id}
-                            className="inventory-item"
-                            style={{
-                              backgroundColor: "#fef2f2",
-                              padding: "16px",
-                              borderRadius: "8px",
-                              border: "none",
-                            }}
-                          >
-                            <div>
-                              <strong style={{ fontSize: "16px" }}>
-                                {item.name}
-                              </strong>
+                        .map((item) => {
+                          const formState = restockForms[item.id] || {
+                            quantity: 50,
+                            supplier_id:
+                              item.supplier_id ||
+                              (suppliers.length > 0 ? suppliers[0].id : ""),
+                          };
+
+                          return (
+                            <div
+                              key={item.id}
+                              className="inventory-item"
+                              style={{
+                                backgroundColor: "#fef2f2",
+                                padding: "16px",
+                                borderRadius: "8px",
+                                border: "1px solid #fecaca",
+                              }}
+                            >
                               <div
                                 style={{
-                                  fontSize: "13px",
-                                  color: "#ef4444",
-                                  fontWeight: "bold",
-                                  marginTop: "4px",
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "flex-start",
+                                  marginBottom: "12px",
                                 }}
                               >
-                                Only {item.stock_quantity} units left!
+                                <div>
+                                  <strong
+                                    style={{
+                                      fontSize: "16px",
+                                      color: "#0f172a",
+                                    }}
+                                  >
+                                    {item.name}
+                                  </strong>
+                                  <div
+                                    style={{
+                                      fontSize: "13px",
+                                      color: "#ef4444",
+                                      fontWeight: "bold",
+                                      marginTop: "4px",
+                                    }}
+                                  >
+                                    Only {item.stock_quantity} units left!
+                                  </div>
+                                </div>
+                                {reorderedItems.includes(item.id) && (
+                                  <span
+                                    style={{
+                                      backgroundColor: "#10b981",
+                                      color: "white",
+                                      padding: "4px 10px",
+                                      borderRadius: "20px",
+                                      fontSize: "0.8rem",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    Order Placed ✓
+                                  </span>
+                                )}
                               </div>
+
+                              {!reorderedItems.includes(item.id) && (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    gap: "8px",
+                                    alignItems: "center",
+                                    background: "white",
+                                    padding: "10px",
+                                    borderRadius: "6px",
+                                    border: "1px solid #fecaca",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      width: "80px",
+                                    }}
+                                  >
+                                    <label
+                                      style={{
+                                        fontSize: "0.7rem",
+                                        color: "#64748b",
+                                        fontWeight: "bold",
+                                        marginBottom: "2px",
+                                      }}
+                                    >
+                                      QTY
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      value={formState.quantity || ""}
+                                      placeholder="50"
+                                      onChange={(e) =>
+                                        handleRestockChange(
+                                          item.id,
+                                          "quantity",
+                                          e.target.value,
+                                        )
+                                      }
+                                      style={{
+                                        padding: "8px",
+                                        borderRadius: "6px",
+                                        border: "1px solid #cbd5e1",
+                                        outline: "none",
+                                        fontSize: "0.9rem",
+                                      }}
+                                    />
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      flex: 1,
+                                    }}
+                                  >
+                                    <label
+                                      style={{
+                                        fontSize: "0.7rem",
+                                        color: "#64748b",
+                                        fontWeight: "bold",
+                                        marginBottom: "2px",
+                                      }}
+                                    >
+                                      VENDOR
+                                    </label>
+                                    <select
+                                      value={
+                                        formState.supplier_id ||
+                                        (suppliers.length > 0
+                                          ? suppliers[0].id
+                                          : "")
+                                      }
+                                      onChange={(e) =>
+                                        handleRestockChange(
+                                          item.id,
+                                          "supplier_id",
+                                          e.target.value,
+                                        )
+                                      }
+                                      style={{
+                                        padding: "8px",
+                                        borderRadius: "6px",
+                                        border: "1px solid #cbd5e1",
+                                        outline: "none",
+                                        fontSize: "0.9rem",
+                                        width: "100%",
+                                      }}
+                                    >
+                                      {suppliers.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.name} ({s.reliability_score}/10)
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <button
+                                    className="action-btn btn-blue"
+                                    style={{
+                                      alignSelf: "flex-end",
+                                      height: "36px",
+                                      padding: "0 16px",
+                                    }}
+                                    onClick={() => handleReorder(item)}
+                                  >
+                                    Order Stock
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                            {reorderedItems.includes(item.id) ? (
-                              <button
-                                className="action-btn"
-                                style={{
-                                  backgroundColor: "#10b981",
-                                  cursor: "not-allowed",
-                                  opacity: 0.9,
-                                }}
-                                disabled
-                              >
-                                Restock Placed ✓
-                              </button>
-                            ) : (
-                              <button
-                                className="action-btn btn-blue"
-                                onClick={() => handleReorder(item.id)}
-                              >
-                                1-Click Restock
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                     </div>
                   </div>
                 )}
@@ -1215,7 +1400,7 @@ const ManagerDashboard = () => {
                           </div>
                         </div>
 
-                        {/* RIGHT COLUMN: FULFILLMENT ACTIONS (Address & Upload) */}
+                        {/* RIGHT COLUMN: FULFILLMENT ACTIONS */}
                         <div
                           style={{
                             background: "white",
@@ -1227,7 +1412,6 @@ const ManagerDashboard = () => {
                             gap: "1.5rem",
                           }}
                         >
-                          {/* 1. CUSTOMER DELIVERY ADDRESS BLOCK WITH PHONE */}
                           <div
                             style={{
                               padding: "1rem",
@@ -1268,8 +1452,6 @@ const ManagerDashboard = () => {
                                 {order.delivery_address ||
                                   "Address details routine"}
                               </p>
-
-                              {/* NEW: Customer Phone Number */}
                               <div
                                 style={{
                                   borderTop: "1px dashed var(--border)",
@@ -1289,7 +1471,7 @@ const ManagerDashboard = () => {
                             </div>
                           </div>
 
-                          {/* 2. PACKING SNAPSHOT UPLOAD SECTION */}
+                          {/* PACKING SNAPSHOT */}
                           {isPending && (
                             <div
                               style={{
@@ -1345,7 +1527,6 @@ const ManagerDashboard = () => {
                                   </span>
                                 )}
                               </div>
-
                               <input
                                 type="file"
                                 accept="image/*"
@@ -1365,7 +1546,7 @@ const ManagerDashboard = () => {
                             </div>
                           )}
 
-                          {/* --- ASSIGN DELIVERY AGENT BLOCK WITH AGENT PHONE --- */}
+                          {/* ASSIGN DELIVERY AGENT */}
                           {isPending && (
                             <div
                               style={{
@@ -1413,8 +1594,6 @@ const ManagerDashboard = () => {
                                     <User size={18} /> Assigned:{" "}
                                     {order.delivery_agent.toUpperCase()}
                                   </div>
-
-                                  {/* NEW: Driver Phone Number */}
                                   {order.agent_phone &&
                                     order.agent_phone !== "Not Provided" && (
                                       <div
@@ -1474,7 +1653,7 @@ const ManagerDashboard = () => {
                             </div>
                           )}
 
-                          {/* --- 3. PROOF OF DELIVERY BLOCK --- */}
+                          {/* PROOF OF DELIVERY BLOCK */}
                           {order.delivery_photo && (
                             <div
                               style={{
@@ -1531,7 +1710,6 @@ const ManagerDashboard = () => {
                             </div>
                           )}
 
-                          {/* FULFILLMENT CONTROL PANEL BUTTON */}
                           <div
                             style={{
                               borderTop: "1px dashed var(--border)",
@@ -1582,7 +1760,6 @@ const ManagerDashboard = () => {
                                 <UploadCloud size={18} /> Mark Shipped
                               </button>
                             )}
-
                             {!isPending && (
                               <button
                                 disabled
@@ -1674,7 +1851,7 @@ const ManagerDashboard = () => {
         </div>
       </main>
 
-      {/* --- ADD/EDIT PRODUCT MODAL --- */}
+      {/* MODALS */}
       {isModalOpen && (
         <div
           style={{

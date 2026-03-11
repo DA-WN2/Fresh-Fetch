@@ -11,6 +11,8 @@ from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.parsers import JSONParser
+from django.utils import timezone
+from datetime import timedelta
 
 # Model and Serializer imports
 from .models import Product, Order, OrderItem, Store, WasteLog, Supplier, RestockOrder, Category
@@ -42,7 +44,7 @@ class CustomerCheckoutView(APIView):
         # Expected payload: {"cart_items": [{"product_id": 1, "quantity": 2}], "delivery_address": "123 Main St"}
         cart_items = request.data.get('cart_items', [])
         
-        # NEW: Extract the delivery address sent from React Checkout.jsx
+        # Extract the delivery address sent from React Checkout.jsx
         delivery_address = request.data.get('delivery_address', 'Address not provided')
 
         if not cart_items:
@@ -72,7 +74,7 @@ class CustomerCheckoutView(APIView):
                 created_order_ids = []
                 for store, items in store_item_map.items():
                     
-                    # NEW: Pass the delivery_address to the database
+                    # Pass the delivery_address to the database
                     order = Order.objects.create(
                         store=store,
                         user=request.user,
@@ -135,13 +137,19 @@ class ManagerInventoryView(APIView):
         
         data = []
         for p in products:
-            # NEW LOGIC: Evaluate the exact status based on the date
+            # Evaluate the exact status based on the date
             if p.expiry_date < today:
                 expiry_status = "Expired"
             elif p.is_near_expiry:
                 expiry_status = "Near Expiry"
             else:
                 expiry_status = "Fresh"
+
+            # --- THE FIX: Check if this item is currently on order from the supplier ---
+            is_reordered = RestockOrder.objects.filter(
+                product=p, 
+                status__in=['Pending', 'Shipped'] # If it's pending or shipped, it's incoming!
+            ).exists()
 
             data.append({
                 "id": p.id,
@@ -153,7 +161,8 @@ class ManagerInventoryView(APIView):
                 "stock_quantity": p.stock_quantity,
                 "expiry_date": p.expiry_date,
                 "is_near_expiry": p.is_near_expiry,
-                "expiry": expiry_status # Pass the evaluated status
+                "expiry": expiry_status,
+                "is_reordered": is_reordered # Pass flag to React to keep the checkmark!
             })
         return Response(data)
 
@@ -224,7 +233,7 @@ class ManagerProductDetailView(APIView):
 # --- MANAGER: FULFILLMENT & LOGISTICS ---
 
 class ManagerOrdersView(APIView):
-    """USE CASE: Fulfillment Queue. Now strictly sends Delivery Addresses and Photo status."""
+    """USE CASE: Fulfillment Queue."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -248,7 +257,7 @@ class ManagerOrdersView(APIView):
                 "created_at": o.created_at,
                 "items": items_data,
                 "delivery_address": o.delivery_address if o.delivery_address else "Pickup Routine",
-                "hasUploadedPhoto": bool(o.packing_photo), # Pass boolean so React can disable "Mark Shipped"
+                "hasUploadedPhoto": bool(o.packing_photo),
                 "delivery_photo": request.build_absolute_uri(o.delivery_photo.url) if o.delivery_photo else None,
                 "delivery_agent": o.delivery_agent.username if o.delivery_agent else None,
                 "customer_phone": getattr(o.user, 'phone_number', 'Not Provided'),
@@ -270,8 +279,6 @@ class UpdateOrderStatusView(APIView):
             new_status = request.data.get('status')
             
             if new_status:
-                # --- NEW VALIDATION RULE ADDED HERE ---
-                # Check if they are trying to mark it shipped, but have no photo uploaded.
                 if new_status.lower() == 'shipped' and not order.packing_photo:
                     return Response({
                         "error": "You must upload a packing snapshot before marking this order as shipped. It's a security rule!"
@@ -297,13 +304,11 @@ class UploadPackingPhotoView(APIView):
             store = request.user.managed_store
             order = Order.objects.get(id=order_id, store=store)
             
-            # Grab the file sent from React
             packing_image = request.FILES.get('image')
             
             if not packing_image:
                 return Response({"error": "No image provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Save the image to the database field
             order.packing_photo = packing_image
             order.save()
             
@@ -365,7 +370,7 @@ class RunPricingEngineView(APIView):
             return Response({
                 "message": "Cleanup Complete.",
                 "discounted": discounted_count,
-                "expired_items": expired_list # Send this list to the React Dashboard
+                "expired_items": expired_list
             })
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -414,7 +419,7 @@ class ReportAuditView(APIView):
             return Response({"error": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class TriggerRestockView(APIView):
-    """USE CASE: 1-Click Supply Chain Restock."""
+    """Allows Manager to order custom quantities from specific suppliers."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -422,29 +427,35 @@ class TriggerRestockView(APIView):
             return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
 
         product_id = request.data.get('product_id')
-        restock_qty = int(request.data.get('quantity', 50)) 
+        quantity = int(request.data.get('quantity', 50))
+        supplier_id = request.data.get('supplier_id')
 
         try:
-            product = Product.objects.get(id=product_id, store=request.user.managed_store)
+            product = Product.objects.get(id=product_id)
             
-            if not product.supplier:
-                return Response({"error": "No supplier assigned."}, status=status.HTTP_400_BAD_REQUEST)
+            if supplier_id:
+                supplier = Supplier.objects.get(id=supplier_id)
+            else:
+                return Response({"error": "Please select a supplier."}, status=status.HTTP_400_BAD_REQUEST)
 
+            expected_date = timezone.now().date() + timedelta(days=3)
+            
             RestockOrder.objects.create(
-                supplier=product.supplier,
+                supplier=supplier,
                 product=product,
-                quantity=restock_qty,
-                expected_delivery=timezone.now().date() + datetime.timedelta(days=3)
+                quantity=quantity,
+                expected_delivery=expected_date,
+                status="Pending"
             )
 
             return Response({
-                "message": f"Restock order placed: {restock_qty} {product.name} from {product.supplier.name}."
-            })
-            
+                "message": f"Restock order placed: {quantity}x {product.name} from {supplier.name}."
+            }, status=status.HTTP_200_OK)
+
         except Product.DoesNotExist:
             return Response({"error": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Supplier.DoesNotExist:
+            return Response({"error": "Supplier not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
 # --- MANAGER: ANALYTICS ---
@@ -476,8 +487,31 @@ class EnvironmentalImpactView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+class SupplierScoresView(APIView):
+    """Fetches real suppliers from the database for the manager dashboard dropdown."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', '') != 'manager':
+            return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Fetch ALL suppliers from the database
+        suppliers = Supplier.objects.all()
+        
+        data = []
+        for s in suppliers:
+            data.append({
+                "id": s.id,
+                "name": s.name,
+                "reliability_score": s.reliability_score,
+                "quality_rating": s.quality_rating,
+                "status": "Active"
+            })
+            
+        return Response(data, status=status.HTTP_200_OK)
+
 class SupplierReliabilityView(APIView):
-    """USE CASE: Vendor Scoring system."""
+    """Legacy View - you can use either this one or SupplierScoresView."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -565,7 +599,6 @@ class CustomerOrderHistoryView(APIView):
                 "delivery_address": order.delivery_address,
                 "is_transferred": order.is_transferred,
                 "transferred_by": order.transferred_by, 
-                # --- NEW: Sent the packing photo URL to React ---
                 "packing_photo": request.build_absolute_uri(order.packing_photo.url) if order.packing_photo else None,
                 "items": item_list
             })
@@ -575,23 +608,19 @@ class CustomerOrderHistoryView(APIView):
 
 class TransferOrderView(APIView):
     """
-    Allows a customer to transfer a pending order to another user,
-    while saving the original sender's name so the recipient knows who sent it.
+    Use Case: Third-Party Access.
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, order_id):
-        # 1. Does the order exist?
         try:
             order = Order.objects.get(id=order_id)
         except Order.DoesNotExist:
             return Response({"error": f"Database could not find Order #{order_id}."}, status=status.HTTP_404_NOT_FOUND)
 
-        # 2. Does it belong to the logged-in user?
         if order.user != request.user:
             return Response({"error": "You do not have permission to transfer this order."}, status=status.HTTP_403_FORBIDDEN)
             
-        # 3. Is it still pending?
         if order.status.lower() != "pending":
             return Response({"error": "Only 'Pending' orders can be transferred."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -604,18 +633,16 @@ class TransferOrderView(APIView):
         if new_username == request.user.username:
             return Response({"error": "You cannot transfer an order to yourself."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 4. Does the recipient exist?
         try:
             new_user = User.objects.get(username=new_username)
         except User.DoesNotExist:
             return Response({"error": f"User '{new_username}' does not exist. Check spelling!"}, status=status.HTTP_404_NOT_FOUND)
 
-        # 5. Success! Update the order with bulletproof sender name fallback
         sender_name = getattr(request.user, 'username', '')
         if not sender_name:
             sender_name = getattr(request.user, 'email', str(request.user))
             
-        order.transferred_by = sender_name # <-- Safely records who sent the gift
+        order.transferred_by = sender_name 
         order.user = new_user
         order.delivery_address = new_address
         order.is_transferred = True
@@ -624,23 +651,18 @@ class TransferOrderView(APIView):
         return Response({"message": f"Order #{order.id} successfully transferred to {new_username}!"}, status=status.HTTP_200_OK)
     
 
-    # --- DELIVERY AGENT VIEWS ---
+# --- DELIVERY AGENT VIEWS ---
 
 class DeliveryOrdersView(APIView):
     """Fetches orders that are waiting to be delivered or currently in transit."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Optional: If you strictly enforce roles, uncomment the next two lines:
-        # if getattr(request.user, 'role', '') != 'delivery':
-        #     return Response({"error": "Access Denied. Delivery agents only."}, status=status.HTTP_403_FORBIDDEN)
-
-        # Fetch orders that the manager has Shipped, or the driver is currently delivering
+        # Fetch orders assigned to THIS specific driver that are shipped or in transit
         orders = Order.objects.filter(delivery_agent=request.user, status__in=['Shipped', 'Out for Delivery']).order_by('created_at')
         
         data = []
         for o in orders:
-            # Calculate total dynamically just in case
             order_total = sum([float(item.price_at_purchase) * item.quantity for item in o.items.all()])
             
             data.append({
@@ -660,8 +682,6 @@ class DeliveryOrdersView(APIView):
 class DeliveryUpdateStatusView(APIView):
     """Allows the delivery agent to update the delivery pipeline and upload proof."""
     permission_classes = [IsAuthenticated]
-    
-    # We need these parsers to accept image files from the delivery app
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request, order_id):
@@ -672,7 +692,7 @@ class DeliveryUpdateStatusView(APIView):
             if new_status in ['Out for Delivery', 'Delivered']:
                 order.status = new_status
 
-                # --- NEW: If delivered, save the proof photo! ---
+                # If delivered, save the proof photo
                 if new_status == 'Delivered':
                     photo = request.FILES.get('image')
                     if photo:
@@ -695,12 +715,10 @@ class AvailableDeliveryAgentsView(APIView):
         if getattr(request.user, 'role', '') != 'manager':
             return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
         
-        # Fetch all delivery agents
         agents = User.objects.filter(role__in=['delivery', 'delivery_agent'])
         data = []
         
         for agent in agents:
-            # SMART LOGIC: If they hold an active order, they are busy. If not, they are available!
             is_busy = Order.objects.filter(delivery_agent=agent, status__in=['Shipped', 'Out for Delivery']).exists()
             
             data.append({
@@ -734,3 +752,82 @@ class AssignDeliveryAgentView(APIView):
         
         except (Order.DoesNotExist, User.DoesNotExist):
             return Response({"error": "Order or Agent not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+
+# --- SUPPLIER / B2B VIEWS ---
+
+class SupplierRestockOrdersView(APIView):
+    """Fetches incoming wholesale requests for the logged-in Supplier."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', '') != 'supplier':
+            return Response({"error": "Access Denied. Suppliers only."}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            supplier_profile = request.user.supplier_profile
+        except Exception:
+            return Response({"error": "Your account is not linked to a Supplier profile in the database."}, status=status.HTTP_400_BAD_REQUEST)
+
+        orders = RestockOrder.objects.filter(supplier=supplier_profile).order_by('-id')
+        
+        data = []
+        for o in orders:
+            data.append({
+                "id": o.id,
+                "product_name": o.product.name,
+                "request_qty": o.quantity,
+                "expected_delivery": o.expected_delivery,
+                "status": getattr(o, 'status', 'Pending'),
+                "store_name": o.product.store.name if o.product.store else "Main Warehouse"
+            })
+        return Response(data)
+
+
+class UpdateRestockOrderStatusView(APIView):
+    """Allows the Supplier to update the shipment status. Auto-adds to store inventory when Delivered!"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, order_id):
+        if getattr(request.user, 'role', '') != 'supplier':
+            return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            supplier_profile = request.user.supplier_profile
+            order = RestockOrder.objects.get(id=order_id, supplier=supplier_profile)
+            new_status = request.data.get('status')
+            
+            if new_status:
+                with transaction.atomic():
+                    order.status = new_status
+                    order.save()
+
+                    # SMART INVENTORY: When supplier delivers, rejuvenate the product!
+                    if new_status == 'Delivered':
+                        product = order.product
+                        
+                        # 1. Add the new stock
+                        product.stock_quantity += order.quantity
+                        
+                        # 2. Assign the EXACT expiry date provided by the supplier
+                        provided_expiry = request.data.get('expiry_date')
+                        if provided_expiry:
+                            product.expiry_date = provided_expiry
+                        else:
+                            # Fallback just in case (should be blocked by frontend anyway)
+                            product.expiry_date = timezone.now().date() + timedelta(days=30)
+                        
+                        # 3. Reset Pricing & Flags (Removes any old auto-discounts)
+                        product.current_price = product.original_price
+                        product.is_near_expiry = False
+                        
+                        product.save()
+
+                return Response({"message": f"Restock Order #{order.id} marked as {new_status}!"})
+            
+            return Response({"error": "No status provided."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        except RestockOrder.DoesNotExist:
+            return Response({"error": "Restock Order not found in database."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
