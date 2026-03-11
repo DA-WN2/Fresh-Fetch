@@ -3,115 +3,97 @@ from django.utils import timezone
 from datetime import date
 from django.conf import settings
 
+# --- 1. MULTI-STORE HUB ---
+class Store(models.Model):
+    name = models.CharField(max_length=150)
+    location = models.CharField(max_length=255)
+    manager = models.OneToOneField(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='managed_store'
+    )
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.location})"
+
+# --- 2. CATEGORY ---
 class Category(models.Model):
     name = models.CharField(max_length=100)
-
     class Meta:
         verbose_name_plural = "Categories"
-
     def __str__(self):
         return self.name
 
+# --- 3. SUPPLIER RELIABILITY ---
+class Supplier(models.Model):
+    name = models.CharField(max_length=150)
+    contact_email = models.EmailField()
+    reliability_score = models.FloatField(default=10.0) 
+    quality_rating = models.FloatField(default=5.0)
+
+    def __str__(self):
+        return f"{self.name} (Score: {self.reliability_score})"
+
+# --- 4. PRODUCT ---
 class Product(models.Model):
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='products', null=True)
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
     name = models.CharField(max_length=200)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
     description = models.TextField(blank=True)
-    
-    # Pricing
     original_price = models.DecimalField(max_digits=10, decimal_places=2)
     current_price = models.DecimalField(max_digits=10, decimal_places=2)
-    
-    # Inventory details
     stock_quantity = models.PositiveIntegerField(default=0)
     unit = models.CharField(max_length=20, default="kg")
-    
-    # Smart logic fields
     manufactured_date = models.DateField()
     expiry_date = models.DateField()
     is_near_expiry = models.BooleanField(default=False)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} - {self.store.name if self.store else 'No Store'}"
+
+    # NEW: Logic for stock status (Fixes AttributeError in Admin and API)
+    @property
+    def stock_status(self):
+        """Dynamically calculates the stock status for the Admin Panel and API."""
+        if self.stock_quantity <= 0:
+            return "Out of Stock"
+        elif self.stock_quantity <= 5:
+            return "Low Stock"
+        return "In Stock"
 
     def check_and_update_smart_pricing(self):
-        """
-        Use Case 1: Automated Shelf-Life Aware Pricing.
-        If the product is within 3 days of expiry, mark it as near-expiry 
-        and apply a 30% discount automatically.
-        """
+        """Use Case: Shelf-Aware Pricing Logic."""
         days_to_expiry = (self.expiry_date - date.today()).days
-        
         if 0 <= days_to_expiry <= 3:
             self.is_near_expiry = True
-            # Apply 30% discount logic
             discounted_price = float(self.original_price) * 0.70
             self.current_price = round(discounted_price, 2)
         else:
             self.is_near_expiry = False
             self.current_price = self.original_price
-        
         self.save()
 
-    def check_stock_status(self):
-        """
-        Use Case 2: Silent Stock Depletion Detection.
-        Simple logic to flag products that are out of stock.
-        """
-        if self.stock_quantity == 0:
-            return "Out of Stock"
-        elif self.stock_quantity < 5:
-            return "Low Stock Alert"
-        return "In Stock"
-    @property
-    def stock_status(self):
-        """
-        Use Case 2: Silent Stock Depletion Detection.
-        Flags items based on inventory thresholds.
-        """
-        if self.stock_quantity == 0:
-            return "OUT OF STOCK"
-        elif self.stock_quantity <= 5:
-            return "LOW STOCK (Reorder Soon)"
-        return "STABLE"
-    # def calculate_supplier_urgency(self):
-    #     """
-    #     Use Case 3: Supplier Reliability & Urgency Scoring.
-    #     Determines how critical the replenishment is for the supply chain.
-    #     """
-    #     if self.stock_quantity <= 2:
-    #         return "CRITICAL - Immediate Restock Required"
-    #     return "ROUTINE - Restock within 24 hours"
-    def trigger_supplier_restock(self):
-        """
-        Use Case 3: Proactive Supply Chain Management.
-        Simulates an API call to a specific Supplier for replenishment.
-        """
-        if self.stock_quantity <= 2:
-            return f"SENT: Restock request for {self.name} to assigned Supplier."
-        return "Stock levels sufficient."
-    def get_logistics_priority(self):
-        """
-        Use Case 4: Logistics & Multi-Vendor Routing.
-        Categorizes items for delivery agent efficiency.
-        """
-        if self.category.name == "Perishables":
-            return "EXPRESS - Priority Cold-Chain Delivery"
-        return "STANDARD - Routine Delivery"
-
+# --- 5. ORDERS & LOGISTICS ---
+# --- 5. ORDERS & LOGISTICS ---
+# --- 5. ORDERS & LOGISTICS ---
 class Order(models.Model):
-    # Link to the user who placed the order
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='orders', null=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    packing_photo = models.ImageField(upload_to='packing_photos/', blank=True, null=True)
+    delivery_address = models.TextField(blank=True, null=True) 
     created_at = models.DateTimeField(auto_now_add=True)
-    
-    # Use Case 4 Logic: Track if the whole order needs Express/Cold-Chain
     is_express = models.BooleanField(default=False) 
     
-    # Payment Status
-    status = models.CharField(max_length=20, default="Pending") # Pending, Paid, Shipped
+    is_transferred = models.BooleanField(default=False) 
+    # NEW: Store the username of the person who sent it!
+    transferred_by = models.CharField(max_length=150, blank=True, null=True) 
+    
+    status = models.CharField(max_length=20, default="Pending") 
     transaction_id = models.CharField(max_length=100, blank=True)
-
-    def __str__(self):
-        return f"Order {self.id} - {self.user.username}"
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
@@ -119,6 +101,26 @@ class OrderItem(models.Model):
     quantity = models.PositiveIntegerField(default=1)
     price_at_purchase = models.DecimalField(max_digits=10, decimal_places=2)
 
-    def __str__(self):
-        return f"{self.quantity} x {self.product.name}"
-    
+# --- 6. ERP LOGGING ---
+class WasteLog(models.Model):
+    REASONS = [
+        ('Theft', 'Theft/Shrinkage'),
+        ('Expired', 'Expiry Disposal'),
+        ('Damaged', 'Damaged in Transit'),
+    ]
+    product_name = models.CharField(max_length=200)
+    store = models.ForeignKey(Store, on_delete=models.CASCADE)
+    quantity_lost = models.PositiveIntegerField()
+    reason = models.CharField(max_length=20, choices=REASONS)
+    carbon_footprint_est = models.FloatField(default=0.0) 
+    financial_loss = models.DecimalField(max_digits=10, decimal_places=2)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+class RestockOrder(models.Model):
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField()
+    expected_delivery = models.DateField()
+    actual_delivery = models.DateField(null=True, blank=True)
+    quality_received = models.IntegerField(choices=[(i, i) for i in range(1, 6)], null=True, blank=True)
+    is_completed = models.BooleanField(default=False)

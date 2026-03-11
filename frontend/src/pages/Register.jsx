@@ -4,75 +4,110 @@ import { useNavigate, Link } from "react-router-dom";
 import "../styles/Auth.css";
 
 const Register = () => {
+  // SECURITY FIX: Removed 'role' from state. The backend automatically defaults to 'customer'.
   const [formData, setFormData] = useState({
     username: "",
     email: "",
     password: "",
-    role: "customer",
   });
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    setError(""); // Clear previous errors before trying again
+
     try {
-      // Note: You'll need to create this endpoint in Django later
       await axios.post(
         "http://127.0.0.1:8000/api/customer/register/",
         formData,
       );
-      alert("Registration successful! Please login.");
+      alert("Registration successful! You can now log in.");
       navigate("/login");
     } catch (err) {
-      alert("Registration failed. Try a different username.");
+      console.error("Registration Error:", err);
+      // Show a specific error from the Django backend if it exists
+      if (err.response && err.response.data && err.response.data.error) {
+        setError(err.response.data.error);
+      } else {
+        setError("Registration failed. Please try a different username.");
+      }
     }
   };
 
   return (
-    <div className="checkout-container">
-      <div className="payment-gateway">
+    <div className="auth-container">
+      <div className="auth-card">
         <h2>Create Account</h2>
-        <form onSubmit={handleRegister}>
-          <input
-            type="text"
-            placeholder="Username"
-            required
-            onChange={(e) =>
-              setFormData({ ...formData, username: e.target.value })
-            }
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            required
-            onChange={(e) =>
-              setFormData({ ...formData, email: e.target.value })
-            }
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            required
-            onChange={(e) =>
-              setFormData({ ...formData, password: e.target.value })
-            }
-          />
+        <p className="auth-subtitle">Join Fresh-Fetch to start shopping</p>
 
-          <select
-            value={formData.role}
-            onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+        {/* Dynamic Error Message Display */}
+        {error && (
+          <div
+            style={{
+              background: "#ffeaa7",
+              color: "#d35400",
+              padding: "10px",
+              borderRadius: "8px",
+              marginBottom: "15px",
+              fontWeight: "bold",
+            }}
           >
-            <option value="customer">Customer</option>
-            <option value="manager">Store Manager</option>
-            <option value="delivery">Delivery Agent</option>
-          </select>
+            {error}
+          </div>
+        )}
 
-          <button type="submit" className="pay-btn">
+        <form className="auth-form" onSubmit={handleRegister}>
+          <div className="auth-input-group">
+            <label>Username</label>
+            <input
+              type="text"
+              placeholder="Choose a username"
+              required
+              value={formData.username}
+              onChange={(e) =>
+                setFormData({ ...formData, username: e.target.value })
+              }
+            />
+          </div>
+
+          <div className="auth-input-group">
+            <label>Email</label>
+            <input
+              type="email"
+              placeholder="Enter your email"
+              required
+              value={formData.email}
+              onChange={(e) =>
+                setFormData({ ...formData, email: e.target.value })
+              }
+            />
+          </div>
+
+          <div className="auth-input-group">
+            <label>Password</label>
+            <input
+              type="password"
+              placeholder="Create a password"
+              required
+              value={formData.password}
+              onChange={(e) =>
+                setFormData({ ...formData, password: e.target.value })
+              }
+            />
+          </div>
+
+          <button type="submit" className="auth-btn">
             Sign Up
           </button>
         </form>
-        <p>
-          Already have an account? <Link to="/login">Login</Link>
-        </p>
+
+        <div className="auth-footer">
+          Already have an account?{" "}
+          <Link to="/login" className="auth-link">
+            Login here
+          </Link>
+        </div>
       </div>
     </div>
   );

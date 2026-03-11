@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
-// Reusing your professional light theme styles
+// Using the dedicated authentication styles
 import "../styles/Auth.css";
 
 // Helper function to get CSRF token from cookies
@@ -56,25 +56,21 @@ const Login = () => {
       );
 
       // 1. Save Identity for the session
+      const userRole = res.data.role;
       localStorage.setItem("token", res.data.token);
-      localStorage.setItem("role", res.data.role);
+      localStorage.setItem("role", userRole);
       localStorage.setItem("username", res.data.username);
 
-      // 2. Role-Based Redirection Logic
-      switch (res.data.role) {
-        case "manager":
-          navigate("/manager-dashboard");
-          break;
-        case "delivery":
-          navigate("/delivery-portal");
-          break;
-        case "supplier":
-          navigate("/supplier-inventory");
-          break;
-        case "customer":
-        default:
-          navigate("/"); // Back to Marketplace
-          break;
+      // 2. SMART Role-Based Redirection Logic
+      // This catches 'delivery_agent' exactly as you typed it in the Django Admin!
+      if (userRole === "manager") {
+        navigate("/manager-dashboard");
+      } else if (userRole === "delivery" || userRole === "delivery_agent") {
+        navigate("/delivery-portal");
+      } else if (userRole === "supplier") {
+        navigate("/supplier-inventory");
+      } else {
+        navigate("/"); // Normal customers go to the Marketplace
       }
     } catch (err) {
       console.error("Login Error:", err);
@@ -97,39 +93,29 @@ const Login = () => {
   };
 
   return (
-    <div className="checkout-container">
-      <div className="payment-gateway">
-        <div className="brand">
-          <div
-            className="brand-badge"
-            style={{ backgroundColor: "var(--primary)" }}
-          >
-            FF
-          </div>
-          <h2>Fresh-Fetch Login</h2>
-        </div>
-
-        <p className="subtitle">
-          Enter your credentials to access your dashboard
-        </p>
+    <div className="auth-container">
+      <div className="auth-card">
+        <h2>Welcome Back</h2>
+        <p className="auth-subtitle">Login to your Fresh-Fetch account</p>
 
         {error && (
           <div
-            className="badge-expiry"
-            style={{ position: "static", width: "100%", marginBottom: "1rem" }}
+            style={{
+              background: "#ffeaa7",
+              color: "#d35400",
+              padding: "10px",
+              borderRadius: "8px",
+              marginBottom: "15px",
+              fontWeight: "bold",
+            }}
           >
             {error}
           </div>
         )}
 
-        <form onSubmit={handleLogin}>
-          <div
-            className="form-group"
-            style={{ textAlign: "left", marginBottom: "1.5rem" }}
-          >
-            <label style={{ fontWeight: "700", color: "var(--text-main)" }}>
-              Username
-            </label>
+        <form className="auth-form" onSubmit={handleLogin}>
+          <div className="auth-input-group">
+            <label>Username</label>
             <input
               type="text"
               name="username"
@@ -137,22 +123,11 @@ const Login = () => {
               value={credentials.username}
               onChange={handleChange}
               required
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: "8px",
-                border: "1px solid var(--border)",
-              }}
             />
           </div>
 
-          <div
-            className="form-group"
-            style={{ textAlign: "left", marginBottom: "2rem" }}
-          >
-            <label style={{ fontWeight: "700", color: "var(--text-main)" }}>
-              Password
-            </label>
+          <div className="auth-input-group">
+            <label>Password</label>
             <input
               type="password"
               name="password"
@@ -160,41 +135,17 @@ const Login = () => {
               value={credentials.password}
               onChange={handleChange}
               required
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: "8px",
-                border: "1px solid var(--border)",
-              }}
             />
           </div>
 
-          <button
-            type="submit"
-            className="pay-btn"
-            disabled={loading}
-            style={{
-              background: "var(--primary)",
-              color: "white",
-              border: "none",
-            }}
-          >
-            {loading ? "Authenticating..." : "Login to Fresh-Fetch"}
+          <button type="submit" className="auth-btn" disabled={loading}>
+            {loading ? "Authenticating..." : "Login"}
           </button>
         </form>
 
-        <div
-          style={{
-            marginTop: "1.5rem",
-            fontSize: "0.9rem",
-            color: "var(--text-muted)",
-          }}
-        >
+        <div className="auth-footer">
           Don't have an account?{" "}
-          <Link
-            to="/register"
-            style={{ color: "var(--primary)", fontWeight: "700" }}
-          >
+          <Link to="/register" className="auth-link">
             Register here
           </Link>
         </div>

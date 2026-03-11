@@ -1,12 +1,22 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Product, Category
 
-admin.register(Product)
+# 1. Import all the newly updated models
+from .models import Product, Category, Store, Order, OrderItem
+
+# 2. Register the core models to the Admin panel
+admin.site.register(Category)
+admin.site.register(Store)       # NEW: Store model added!
+admin.site.register(Order)       # NEW: Order model added!
+admin.site.register(OrderItem)   # NEW: OrderItem model added!
+
+# 3. Fixed the decorator syntax (added the '@' symbol)
+@admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     # USE CASE 2: Displaying stock status visually for the Store Manager
     list_display = (
         'name', 
+        'store',            # NEW: Easily see which store owns the product
         'category', 
         'original_price', 
         'current_price', 
@@ -18,7 +28,7 @@ class ProductAdmin(admin.ModelAdmin):
     )
     
     # Allows for easy filtering during your presentation demo
-    list_filter = ('is_near_expiry', 'category')
+    list_filter = ('store', 'is_near_expiry', 'category') # NEW: Filter by store
     
     # USE CASE 1: The "Smart Pricing" trigger action
     actions = ['run_smart_update','notify_suppliers']
@@ -50,11 +60,14 @@ class ProductAdmin(admin.ModelAdmin):
         self.message_user(request, "Smart pricing and expiry checks completed!")
     
     run_smart_update.short_description = "Run Smart Pricing Logic"
+
     def notify_suppliers(self, request, queryset):
         for product in queryset:
             msg = product.trigger_supplier_restock()
             self.message_user(request, msg)
+            
     notify_suppliers.short_description = "Send Restock Request to Supplier"
+    
     def get_delivery_priority(self, obj):
         # Displays the logistics priority in the table
         priority = obj.get_logistics_priority()
@@ -63,6 +76,3 @@ class ProductAdmin(admin.ModelAdmin):
         return priority
     
     get_delivery_priority.short_description = 'Logistics Priority'
-
-# Register Category to manage standard product groups
-admin.site.register(Category)

@@ -1,0 +1,1808 @@
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import { useNavigate } from "react-router-dom";
+import {
+  LayoutDashboard,
+  Package,
+  ShieldAlert,
+  TrendingUp,
+  Zap,
+  Bell,
+  ClipboardList,
+  Truck,
+  Users,
+  Leaf,
+  Plus,
+  Edit,
+  Trash2,
+  UploadCloud,
+  CheckCircle2,
+  AlertTriangle,
+  MapPin,
+} from "lucide-react";
+import "../styles/ManagerDashboard.css";
+
+const ManagerDashboard = () => {
+  const [activeTab, setActiveTab] = useState("OVERVIEW");
+  const [notifications, setNotifications] = useState([]);
+
+  // WASTE REPORT STATE
+  const [wasteReport, setWasteReport] = useState([]);
+  const [isWasteModalOpen, setIsWasteModalOpen] = useState(false);
+
+  const navigate = useNavigate();
+
+  // --- 1. DATA STATE ---
+  const [inventory, setInventory] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [impactData, setImpactData] = useState(null);
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // --- 2. MODAL STATES ---
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [formData, setFormData] = useState({
+    name: "",
+    price: "",
+    stock_quantity: "",
+    expiry_date: "",
+    category_id: 1,
+    supplier_id: "",
+  });
+
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [productToDelete, setProductToDelete] = useState(null);
+  const [reorderedItems, setReorderedItems] = useState([]);
+
+  // --- 3. API CALLS ---
+  const fetchWasteReport = async () => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.get(
+        "http://127.0.0.1:8000/api/manager/waste-report/",
+        {
+          headers: { Authorization: `Token ${token}` },
+        },
+      );
+      setWasteReport(res.data);
+      setIsWasteModalOpen(true);
+    } catch (err) {
+      alert("Failed to fetch waste report.");
+    }
+  };
+
+  const fetchDashboardData = async () => {
+    const token = localStorage.getItem("token");
+    const role = localStorage.getItem("role");
+
+    if (!token || role !== "manager") {
+      navigate("/login");
+      return;
+    }
+
+    const headers = { Authorization: `Token ${token}` };
+
+    try {
+      const [invRes, ordRes, impactRes, suppRes] = await Promise.all([
+        axios.get("http://127.0.0.1:8000/api/manager/inventory/", { headers }),
+        axios.get("http://127.0.0.1:8000/api/manager/orders/", { headers }),
+        axios.get("http://127.0.0.1:8000/api/manager/impact-report/", {
+          headers,
+        }),
+        axios.get("http://127.0.0.1:8000/api/manager/supplier-scores/", {
+          headers,
+        }),
+      ]);
+
+      setInventory(invRes.data);
+      setOrders(ordRes.data);
+      setImpactData(impactRes.data);
+      setSuppliers(suppRes.data);
+      setLoading(false);
+    } catch (error) {
+      console.error("Dashboard Load Error", error);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [navigate]);
+
+  // --- 4. CRUD & ACTION OPERATIONS ---
+
+  const openModal = (product = null) => {
+    if (product) {
+      setFormData({
+        name: product.name,
+        price: product.original_price,
+        stock_quantity: product.stock_quantity,
+        expiry_date: product.expiry_date || "",
+        category_id: product.category_id || 1,
+        supplier_id:
+          product.supplier_id || (suppliers.length > 0 ? suppliers[0].id : ""),
+      });
+      setEditId(product.id);
+    } else {
+      setFormData({
+        name: "",
+        price: "",
+        stock_quantity: "",
+        expiry_date: "",
+        category_id: 1,
+        supplier_id: suppliers.length > 0 ? suppliers[0].id : "",
+      });
+      setEditId(null);
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSaveProduct = async (e) => {
+    e.preventDefault();
+    const token = localStorage.getItem("token");
+    const headers = { Authorization: `Token ${token}` };
+
+    try {
+      if (editId) {
+        await axios.put(
+          `http://127.0.0.1:8000/api/manager/inventory/${editId}/`,
+          formData,
+          { headers },
+        );
+        setNotifications([
+          {
+            id: Date.now(),
+            time: "Just now",
+            message: `${formData.name} updated.`,
+            type: "success",
+          },
+          ...notifications,
+        ]);
+      } else {
+        await axios.post(
+          `http://127.0.0.1:8000/api/manager/inventory/`,
+          formData,
+          { headers },
+        );
+        setNotifications([
+          {
+            id: Date.now(),
+            time: "Just now",
+            message: `${formData.name} added to catalog.`,
+            type: "success",
+          },
+          ...notifications,
+        ]);
+      }
+      setIsModalOpen(false);
+      fetchDashboardData();
+    } catch (err) {
+      alert("Failed to save product.");
+    }
+  };
+
+  const promptDeleteProduct = (product) => {
+    setProductToDelete(product);
+    setIsDeleteModalOpen(true);
+  };
+
+  const executeDeleteProduct = async () => {
+    if (!productToDelete) return;
+    const token = localStorage.getItem("token");
+
+    try {
+      await axios.delete(
+        `http://127.0.0.1:8000/api/manager/inventory/${productToDelete.id}/`,
+        {
+          headers: { Authorization: `Token ${token}` },
+        },
+      );
+      setNotifications([
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: `${productToDelete.name} deleted.`,
+          type: "alert",
+        },
+        ...notifications,
+      ]);
+      setIsDeleteModalOpen(false);
+      setProductToDelete(null);
+      fetchDashboardData();
+    } catch (err) {
+      alert("Failed to delete product.");
+    }
+  };
+
+  const runPricingEngine = async () => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.post(
+        "http://127.0.0.1:8000/api/manager/run-pricing-engine/",
+        {},
+        { headers: { Authorization: `Token ${token}` } },
+      );
+
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: `${res.data.discounted} items discounted.`,
+          type: "success",
+        },
+        ...prev,
+      ]);
+
+      if (res.data.expired_items && res.data.expired_items.length > 0) {
+        res.data.expired_items.forEach((itemInfo) => {
+          setNotifications((prev) => [
+            {
+              id: Math.random(),
+              time: "ACTION REQUIRED",
+              message: `CRITICAL: ${itemInfo} expired. Removed from Online Store. PLEASE REMOVE FROM OFFLINE SHELF IMMEDIATELY.`,
+              type: "alert",
+            },
+            ...prev,
+          ]);
+        });
+      }
+
+      fetchDashboardData();
+    } catch (err) {
+      alert("Pricing engine failed.");
+    }
+  };
+
+  const submitAudit = async (productId, physicalCount) => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.post(
+        "http://127.0.0.1:8000/api/manager/report-audit/",
+        { product_id: productId, physical_count: physicalCount },
+        { headers: { Authorization: `Token ${token}` } },
+      );
+      const type = res.data.discrepancy > 0 ? "alert" : "success";
+      setNotifications([
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: `Audit: ${res.data.product_name} discrepancy of ${res.data.discrepancy} recorded.`,
+          type,
+        },
+        ...notifications,
+      ]);
+      fetchDashboardData();
+    } catch (err) {
+      alert("Audit submission failed.");
+    }
+  };
+
+  const updateOrderStatus = async (orderId, newStatus) => {
+    const token = localStorage.getItem("token");
+    try {
+      await axios.post(
+        `http://127.0.0.1:8000/api/manager/update-order-status/${orderId}/`,
+        { status: newStatus },
+        { headers: { Authorization: `Token ${token}` } },
+      );
+
+      setNotifications([
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: `Order #${orderId} marked as ${newStatus}.`,
+          type: "success",
+        },
+        ...notifications,
+      ]);
+      fetchDashboardData();
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to update status.");
+    }
+  };
+
+  const handleReorder = async (productId) => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.post(
+        "http://127.0.0.1:8000/api/manager/trigger-restock/",
+        { product_id: productId, quantity: 50 },
+        { headers: { Authorization: `Token ${token}` } },
+      );
+      setNotifications([
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: res.data.message,
+          type: "success",
+        },
+        ...notifications,
+      ]);
+      setReorderedItems((prev) => [...prev, productId]);
+      fetchDashboardData();
+    } catch (err) {
+      alert(err.response?.data?.error || "Reorder failed.");
+    }
+  };
+
+  // --- NEW: UPLOAD PACKING PHOTO LOGIC ---
+  const handleUploadPhoto = async (orderId, file) => {
+    if (!file) return;
+
+    const token = localStorage.getItem("token");
+    const formDataObj = new FormData();
+    formDataObj.append("image", file);
+
+    try {
+      const res = await axios.post(
+        `http://127.0.0.1:8000/api/manager/upload-photo/${orderId}/`,
+        formDataObj,
+        {
+          headers: {
+            Authorization: `Token ${token}`,
+            "Content-Type": "multipart/form-data",
+          },
+        },
+      );
+
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: res.data.message,
+          type: "success",
+        },
+        ...prev,
+      ]);
+
+      // Refresh to update the UI so the checkmark appears!
+      fetchDashboardData();
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to upload photo.");
+    }
+  };
+
+  if (loading)
+    return <div className="loading-screen">Loading Branch Intelligence...</div>;
+
+  const pendingOrders = orders.filter(
+    (o) => o.status.toLowerCase() === "pending",
+  ).length;
+  const lowStockCount = inventory.filter((i) => i.stock_quantity <= 5).length;
+
+  return (
+    <div className="manager-dashboard">
+      <aside className="manager-sidebar">
+        <div className="sidebar-header">
+          <h1>Fresh-Fetch.</h1>
+          <p>Manager Enterprise Suite</p>
+        </div>
+        <nav className="sidebar-nav">
+          <button
+            className={`sidebar-btn ${activeTab === "OVERVIEW" ? "active" : ""}`}
+            onClick={() => setActiveTab("OVERVIEW")}
+          >
+            <LayoutDashboard size={20} /> Overview
+          </button>
+          <button
+            className={`sidebar-btn ${activeTab === "CATALOG" ? "active" : ""}`}
+            onClick={() => setActiveTab("CATALOG")}
+          >
+            <Package size={20} /> Catalog
+          </button>
+          <button
+            className={`sidebar-btn ${activeTab === "ORDERS" ? "active" : ""}`}
+            onClick={() => setActiveTab("ORDERS")}
+          >
+            <ClipboardList size={20} /> Fulfillment
+          </button>
+          <button
+            className={`sidebar-btn ${activeTab === "AUDIT" ? "active" : ""}`}
+            onClick={() => setActiveTab("AUDIT")}
+          >
+            <ShieldAlert size={20} /> Theft Audit
+          </button>
+          <button
+            className={`sidebar-btn ${activeTab === "SUPPLIERS" ? "active" : ""}`}
+            onClick={() => setActiveTab("SUPPLIERS")}
+          >
+            <Users size={20} /> Suppliers
+          </button>
+          <button
+            className={`sidebar-btn ${activeTab === "IMPACT" ? "active" : ""}`}
+            onClick={() => setActiveTab("IMPACT")}
+          >
+            <Leaf size={20} /> Sustainability
+          </button>
+        </nav>
+      </aside>
+
+      <main className="manager-main">
+        <header className="manager-header">
+          <div className="header-breadcrumb">
+            Branch Admin &gt; <span>{activeTab}</span>
+          </div>
+          <button
+            className="logout-btn"
+            onClick={() => {
+              localStorage.clear();
+              navigate("/login");
+            }}
+          >
+            Logout
+          </button>
+        </header>
+
+        <div className="manager-content">
+          <div className="content-left">
+            {activeTab === "OVERVIEW" && (
+              <>
+                <div className="stats-grid">
+                  <StatCard
+                    title="Active Orders"
+                    value={pendingOrders}
+                    type="urgent"
+                  />
+                  <StatCard
+                    title="Inventory Alerts"
+                    value={lowStockCount}
+                    type="warning"
+                  />
+                  <StatCard
+                    title="Sustainability Score"
+                    value={`${impactData?.sustainability_score || 100}/100`}
+                    type="success"
+                  />
+                </div>
+
+                {lowStockCount > 0 && (
+                  <div
+                    className="dashboard-card"
+                    style={{ borderColor: "#ef4444", borderWidth: "2px" }}
+                  >
+                    <h3 className="card-title" style={{ color: "#ef4444" }}>
+                      <ShieldAlert size={20} /> Low Stock Action Required
+                    </h3>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "12px",
+                      }}
+                    >
+                      {inventory
+                        .filter((i) => i.stock_quantity <= 5)
+                        .map((item) => (
+                          <div
+                            key={item.id}
+                            className="inventory-item"
+                            style={{
+                              backgroundColor: "#fef2f2",
+                              padding: "16px",
+                              borderRadius: "8px",
+                              border: "none",
+                            }}
+                          >
+                            <div>
+                              <strong style={{ fontSize: "16px" }}>
+                                {item.name}
+                              </strong>
+                              <div
+                                style={{
+                                  fontSize: "13px",
+                                  color: "#ef4444",
+                                  fontWeight: "bold",
+                                  marginTop: "4px",
+                                }}
+                              >
+                                Only {item.stock_quantity} units left!
+                              </div>
+                            </div>
+                            {reorderedItems.includes(item.id) ? (
+                              <button
+                                className="action-btn"
+                                style={{
+                                  backgroundColor: "#10b981",
+                                  cursor: "not-allowed",
+                                  opacity: 0.9,
+                                }}
+                                disabled
+                              >
+                                Restock Placed ✓
+                              </button>
+                            ) : (
+                              <button
+                                className="action-btn btn-blue"
+                                onClick={() => handleReorder(item.id)}
+                              >
+                                1-Click Restock
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="dashboard-card">
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <h3 className="card-title">
+                      <Zap color="#eab308" /> Shelf-Aware Pricing Engine
+                    </h3>
+                    <button
+                      className="action-btn btn-blue"
+                      onClick={runPricingEngine}
+                    >
+                      Run Auto-Discount
+                    </button>
+                  </div>
+                  <p
+                    style={{
+                      fontSize: "14px",
+                      color: "#64748b",
+                      marginTop: "10px",
+                    }}
+                  >
+                    Automatically applies 30% discounts to items expiring within
+                    3 days to reduce food waste.
+                  </p>
+                </div>
+              </>
+            )}
+
+            {activeTab === "CATALOG" && (
+              <div className="dashboard-card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "16px",
+                  }}
+                >
+                  <h3 className="card-title" style={{ margin: 0 }}>
+                    <Package color="#3b82f6" /> Branch Catalog
+                  </h3>
+                  <button
+                    className="action-btn btn-blue"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                    onClick={() => openModal()}
+                  >
+                    <Plus size={16} /> Add Product
+                  </button>
+                </div>
+                <table className="audit-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Price</th>
+                      <th>Stock</th>
+                      <th>Expiry</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventory.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <strong>{item.name}</strong>
+                          {item.expiry === "Near Expiry" && (
+                            <span
+                              style={{
+                                marginLeft: "8px",
+                                fontSize: "10px",
+                                backgroundColor: "#fef08a",
+                                color: "#854d0e",
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              Discounted
+                            </span>
+                          )}
+                          {item.expiry === "Expired" && (
+                            <span
+                              style={{
+                                marginLeft: "8px",
+                                fontSize: "10px",
+                                backgroundColor: "#fee2e2",
+                                color: "#ef4444",
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              Expired
+                            </span>
+                          )}
+                        </td>
+                        <td>₹{item.current_price}</td>
+                        <td>{item.stock_quantity}</td>
+                        <td
+                          style={{
+                            color:
+                              item.expiry === "Expired"
+                                ? "#ef4444"
+                                : item.expiry === "Near Expiry"
+                                  ? "#f59e0b"
+                                  : "#475569",
+                            fontWeight:
+                              item.expiry === "Expired" ? "bold" : "normal",
+                          }}
+                        >
+                          {item.expiry}
+                        </td>
+                        <td style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#3b82f6",
+                              cursor: "pointer",
+                            }}
+                            onClick={() => openModal(item)}
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#ef4444",
+                              cursor: "pointer",
+                            }}
+                            onClick={() => promptDeleteProduct(item)}
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {activeTab === "AUDIT" && (
+              <div className="dashboard-card">
+                <h3 className="card-title">
+                  <ShieldAlert color="#ef4444" /> Stock Discrepancy Audit
+                </h3>
+                <table className="audit-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>System Record</th>
+                      <th>Physical Count</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventory.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <strong>{item.name}</strong>
+                        </td>
+                        <td>{item.stock_quantity} Units</td>
+                        <td>
+                          <input
+                            type="number"
+                            id={`audit-${item.id}`}
+                            placeholder="Counted..."
+                            className="audit-input"
+                          />
+                        </td>
+                        <td>
+                          <button
+                            className="action-btn btn-yellow"
+                            onClick={() =>
+                              submitAudit(
+                                item.id,
+                                document.getElementById(`audit-${item.id}`)
+                                  .value,
+                              )
+                            }
+                          >
+                            Sync Stock
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {activeTab === "SUPPLIERS" && (
+              <div className="dashboard-card">
+                <h3 className="card-title">
+                  <Users color="#8b5cf6" /> Live Supplier Reliability
+                </h3>
+                <div className="supplier-grid">
+                  {suppliers.map((supplier, idx) => (
+                    <div key={idx} className="supplier-item">
+                      <strong>{supplier.name}</strong>
+                      <p
+                        style={{
+                          fontSize: "14px",
+                          color: "#475569",
+                          marginTop: "4px",
+                        }}
+                      >
+                        Score:{" "}
+                        <span
+                          style={{
+                            fontWeight: "bold",
+                            color:
+                              supplier.reliability_score > 8
+                                ? "#10b981"
+                                : "#ef4444",
+                          }}
+                        >
+                          {supplier.reliability_score}/10
+                        </span>{" "}
+                        ({supplier.status})
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === "IMPACT" && (
+              <div className="dashboard-card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "20px",
+                  }}
+                >
+                  <h3 className="card-title" style={{ margin: 0 }}>
+                    <Leaf color="#10b981" /> Branch Environmental Impact
+                  </h3>
+                  <button
+                    className="action-btn btn-blue"
+                    onClick={fetchWasteReport}
+                  >
+                    Generate Waste Report
+                  </button>
+                </div>
+
+                <div className="impact-stats">
+                  <div
+                    className="impact-stat"
+                    style={{
+                      padding: "16px",
+                      backgroundColor: "#f8fafc",
+                      borderRadius: "8px",
+                      border: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <h4
+                      style={{
+                        fontSize: "12px",
+                        color: "#64748b",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Carbon Footprint (Loss)
+                    </h4>
+                    <p
+                      style={{
+                        fontSize: "24px",
+                        fontWeight: "black",
+                        color: "#ef4444",
+                      }}
+                    >
+                      {impactData?.carbon_footprint_kg || 0}{" "}
+                      <span style={{ fontSize: "14px", fontWeight: "normal" }}>
+                        kg CO2e
+                      </span>
+                    </p>
+                  </div>
+                  <div
+                    className="impact-stat"
+                    style={{
+                      padding: "16px",
+                      backgroundColor: "#f8fafc",
+                      borderRadius: "8px",
+                      border: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <h4
+                      style={{
+                        fontSize: "12px",
+                        color: "#64748b",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Financial Shrinkage
+                    </h4>
+                    <p
+                      style={{
+                        fontSize: "24px",
+                        fontWeight: "black",
+                        color: "#f59e0b",
+                      }}
+                    >
+                      ₹{impactData?.financial_loss || 0}
+                    </p>
+                  </div>
+                  <div
+                    className="impact-stat"
+                    style={{
+                      padding: "16px",
+                      backgroundColor: "#f8fafc",
+                      borderRadius: "8px",
+                      border: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <h4
+                      style={{
+                        fontSize: "12px",
+                        color: "#64748b",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Incidents (Theft / Expiry)
+                    </h4>
+                    <p
+                      style={{
+                        fontSize: "24px",
+                        fontWeight: "black",
+                        color: "#3b82f6",
+                      }}
+                    >
+                      {impactData?.theft_incidents || 0} /{" "}
+                      {impactData?.expiry_incidents || 0}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* --- UPDATED: ORDERS FULFILLMENT TAB --- */}
+            {activeTab === "ORDERS" && (
+              <div
+                style={{
+                  background: "white",
+                  padding: "2.5rem",
+                  borderRadius: "var(--radius-card)",
+                  border: "1px solid var(--border)",
+                  boxShadow: "var(--shadow-subtle)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    marginBottom: "2.5rem",
+                  }}
+                >
+                  <Package color="var(--primary)" size={24} />
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: "1.25rem",
+                      color: "var(--text-main)",
+                      fontWeight: "700",
+                    }}
+                  >
+                    Live Fulfillment Queue
+                  </h3>
+                </div>
+
+                {orders.length === 0 ? (
+                  <div
+                    className="status-msg"
+                    style={{
+                      background: "#f8fafc",
+                      padding: "2rem",
+                      borderRadius: "8px",
+                      color: "var(--text-muted)",
+                      textAlign: "center",
+                      fontStyle: "italic",
+                    }}
+                  >
+                    No active orders in fulfillment. System Idle.
+                  </div>
+                ) : (
+                  orders.map((order) => {
+                    const isShipped = order.status.toLowerCase() === "shipped";
+                    const isPending = order.status.toLowerCase() === "pending";
+                    const orderDate = new Date(
+                      order.created_at || Date.now(),
+                    ).toLocaleDateString("en-US", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    });
+                    const orderTime = new Date(
+                      order.created_at || Date.now(),
+                    ).toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    });
+
+                    return (
+                      <div
+                        key={order.id}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr",
+                          gap: "2rem",
+                          padding: "2rem",
+                          background: "#f8fafc",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border)",
+                          marginBottom: "1.5rem",
+                          position: "relative",
+                        }}
+                      >
+                        {/* Order Header/Status Info */}
+                        <div
+                          style={{
+                            gridColumn: "1 / -1",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            borderBottom: "1px dashed var(--border)",
+                            paddingBottom: "1.5rem",
+                            marginBottom: "0.5rem",
+                          }}
+                        >
+                          <div>
+                            <p
+                              style={{
+                                margin: "0 0 6px 0",
+                                fontSize: "0.8rem",
+                                color: "var(--text-muted)",
+                                textTransform: "uppercase",
+                                letterSpacing: "1px",
+                                fontWeight: "700",
+                              }}
+                            >
+                              Fulfillment Routine
+                            </p>
+                            <h4
+                              style={{
+                                margin: "0",
+                                fontSize: "1.6rem",
+                                color: "var(--text-main)",
+                              }}
+                            >
+                              ORDER ID #{order.id}
+                            </h4>
+                            <p
+                              style={{
+                                margin: "6px 0 0 0",
+                                fontSize: "0.9rem",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              Placed: {orderDate} at {orderTime}
+                            </p>
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "flex-end",
+                              gap: "8px",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "0.8rem",
+                                fontWeight: "700",
+                                textTransform: "uppercase",
+                                padding: "6px 12px",
+                                borderRadius: "20px",
+                                backgroundColor: isPending
+                                  ? "#fef08a"
+                                  : "#dbeafe",
+                                color: isPending ? "#854d0e" : "#1e40af",
+                              }}
+                            >
+                              {order.status}
+                            </span>
+                            {isShipped && (
+                              <span
+                                style={{
+                                  color: "var(--text-muted)",
+                                  fontSize: "0.85rem",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                Awaiting routine confirmation
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* LEFT COLUMN: PACKING LIST */}
+                        <div
+                          style={{
+                            background: "white",
+                            padding: "1.5rem",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border)",
+                          }}
+                        >
+                          <h5
+                            style={{
+                              margin: "0 0 1.25rem 0",
+                              color: "var(--text-muted)",
+                              fontSize: "0.85rem",
+                              textTransform: "uppercase",
+                              letterSpacing: "1.2px",
+                              fontWeight: "700",
+                            }}
+                          >
+                            Items to Pack:
+                          </h5>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "10px",
+                            }}
+                          >
+                            {order.items.map((item, i) => (
+                              <div
+                                key={i}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  padding: "10px",
+                                  background: i % 2 === 0 ? "#f8fafc" : "white",
+                                  borderRadius: "6px",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontWeight: "600",
+                                    color: "var(--text-main)",
+                                    fontSize: "0.95rem",
+                                  }}
+                                >
+                                  {item.name}
+                                </span>
+                                <span
+                                  style={{
+                                    background:
+                                      i % 2 === 0 ? "white" : "#f8fafc",
+                                    color: "var(--primary)",
+                                    border:
+                                      i % 2 === 0
+                                        ? "1px solid var(--border)"
+                                        : "1px solid transparent",
+                                    fontWeight: "700",
+                                    width: "32px",
+                                    height: "32px",
+                                    borderRadius: "50%",
+                                    display: "flex",
+                                    justifyContent: "center",
+                                    alignItems: "center",
+                                    fontSize: "0.9rem",
+                                  }}
+                                >
+                                  x{item.quantity}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* RIGHT COLUMN: FULFILLMENT ACTIONS (Address & Upload) */}
+                        <div
+                          style={{
+                            background: "white",
+                            padding: "1.5rem",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border)",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "1.5rem",
+                          }}
+                        >
+                          {/* 1. CUSTOMER DELIVERY ADDRESS BLOCK */}
+                          <div
+                            style={{
+                              padding: "1rem",
+                              background: "#f8fafc",
+                              borderRadius: "8px",
+                              border: "1px solid var(--border)",
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: "10px",
+                            }}
+                          >
+                            <MapPin
+                              size={18}
+                              color="var(--primary)"
+                              style={{ marginTop: "4px" }}
+                            />
+                            <div>
+                              <p
+                                style={{
+                                  margin: "0 0 6px 0",
+                                  fontSize: "0.8rem",
+                                  color: "var(--text-muted)",
+                                  textTransform: "uppercase",
+                                  fontWeight: "700",
+                                  letterSpacing: "0.5px",
+                                }}
+                              >
+                                Deliver to Address:
+                              </p>
+                              <p
+                                style={{
+                                  margin: 0,
+                                  color: "var(--text-main)",
+                                  fontSize: "0.95rem",
+                                  lineHeight: "1.5",
+                                }}
+                              >
+                                {order.delivery_address ||
+                                  "Address details routine"}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* 2. PACKING SNAPSHOT UPLOAD SECTION */}
+                          {isPending && (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "12px",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <h5
+                                  style={{
+                                    margin: "0",
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.85rem",
+                                    textTransform: "uppercase",
+                                    letterSpacing: "1px",
+                                    fontWeight: "700",
+                                  }}
+                                >
+                                  Packing snapshot:
+                                </h5>
+                                {order.hasUploadedPhoto ? (
+                                  <span
+                                    style={{
+                                      fontSize: "0.8rem",
+                                      color: "#10b981",
+                                      fontWeight: "600",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                  >
+                                    <CheckCircle2 size={16} /> Recorded
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      fontSize: "0.8rem",
+                                      color: "#ef4444",
+                                      fontWeight: "600",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                  >
+                                    <AlertTriangle size={16} /> Required
+                                  </span>
+                                )}
+                              </div>
+
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) =>
+                                  handleUploadPhoto(order.id, e.target.files[0])
+                                }
+                                style={{
+                                  width: "100%",
+                                  fontSize: "0.9rem",
+                                  color: "var(--text-main)",
+                                  padding: "8px",
+                                  border: "1px dashed var(--border)",
+                                  borderRadius: "6px",
+                                  background: "#f8fafc",
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          {/* FULFILLMENT CONTROL PANEL BUTTON */}
+                          <div
+                            style={{
+                              borderTop: "1px dashed var(--border)",
+                              paddingTop: "1.5rem",
+                              marginTop: "auto",
+                            }}
+                          >
+                            {isPending && (
+                              <button
+                                onClick={() =>
+                                  updateOrderStatus(order.id, "Shipped")
+                                }
+                                disabled={!order.hasUploadedPhoto}
+                                style={{
+                                  width: "100%",
+                                  padding: "12px",
+                                  borderRadius: "6px",
+                                  fontSize: "0.9rem",
+                                  fontWeight: "700",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "1px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  justifyContent: "center",
+                                  backgroundColor: !order.hasUploadedPhoto
+                                    ? "#e2e8f0"
+                                    : "var(--primary)",
+                                  color: !order.hasUploadedPhoto
+                                    ? "#94a3b8"
+                                    : "white",
+                                  cursor: !order.hasUploadedPhoto
+                                    ? "not-allowed"
+                                    : "pointer",
+                                  border: "none",
+                                  transition: "0.2s",
+                                }}
+                              >
+                                <UploadCloud size={18} /> Mark Shipped{" "}
+                                {!order.hasUploadedPhoto &&
+                                  "(Snapshot Required)"}
+                              </button>
+                            )}
+                            {isShipped && (
+                              <button
+                                disabled
+                                style={{
+                                  width: "100%",
+                                  padding: "12px",
+                                  borderRadius: "6px",
+                                  fontSize: "0.9rem",
+                                  fontWeight: "700",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "1px",
+                                  background: "white",
+                                  color: "#10b981",
+                                  border: "2px solid #10b981",
+                                  cursor: "not-allowed",
+                                  display: "flex",
+                                  justifyContent: "center",
+                                  gap: "8px",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <CheckCircle2 size={18} /> Order Dispatched
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="content-right">
+            <div className="dashboard-card log-panel">
+              <h3 className="card-title">
+                <Bell color="#3b82f6" /> Activity Log
+              </h3>
+              <div className="log-container">
+                {notifications.length === 0 ? (
+                  <p
+                    style={{
+                      textAlign: "center",
+                      color: "#94a3b8",
+                      marginTop: "40px",
+                      fontSize: "14px",
+                    }}
+                  >
+                    System Idle...
+                  </p>
+                ) : (
+                  notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      className={`log-entry ${n.type}`}
+                      style={{ marginBottom: "12px" }}
+                    >
+                      <small
+                        style={{
+                          display: "block",
+                          color: "#94a3b8",
+                          fontSize: "11px",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        {n.time}
+                      </small>
+                      <p
+                        style={{
+                          fontSize: "14px",
+                          color: "#334155",
+                          marginTop: "4px",
+                        }}
+                      >
+                        {n.message}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* --- ADD/EDIT PRODUCT MODAL --- */}
+      {isModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.7)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "32px",
+              borderRadius: "16px",
+              width: "400px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
+            }}
+          >
+            <h2
+              style={{ marginTop: 0, marginBottom: "24px", color: "#0f172a" }}
+            >
+              {editId ? "Edit Product" : "Add New Product"}
+            </h2>
+            <form
+              onSubmit={handleSaveProduct}
+              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+            >
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    color: "#64748b",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Product Name
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: "16px" }}>
+                <div style={{ flex: 1 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      color: "#64748b",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Price (₹)
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    step="0.01"
+                    value={formData.price}
+                    onChange={(e) =>
+                      setFormData({ ...formData, price: e.target.value })
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      color: "#64748b",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    Initial Stock
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    value={formData.stock_quantity}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        stock_quantity: e.target.value,
+                      })
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              </div>
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    color: "#64748b",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Expiry Date
+                </label>
+                <input
+                  required
+                  type="date"
+                  value={formData.expiry_date}
+                  onChange={(e) =>
+                    setFormData({ ...formData, expiry_date: e.target.value })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    color: "#64748b",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Supplier
+                </label>
+                <select
+                  required
+                  value={formData.supplier_id}
+                  onChange={(e) =>
+                    setFormData({ ...formData, supplier_id: e.target.value })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  {suppliers.map((sup) => (
+                    <option key={sup.id} value={sup.id}>
+                      {sup.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "12px",
+                  marginTop: "16px",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: "white",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                    color: "#475569",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="action-btn btn-blue"
+                  style={{ border: "none" }}
+                >
+                  {editId ? "Save Changes" : "Create Product"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- DELETE CONFIRMATION MODAL --- */}
+      {isDeleteModalOpen && productToDelete && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.7)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "32px",
+              borderRadius: "16px",
+              width: "380px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: "#fee2e2",
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                margin: "0 auto 16px auto",
+              }}
+            >
+              <ShieldAlert color="#ef4444" size={24} />
+            </div>
+            <h2
+              style={{
+                marginTop: 0,
+                marginBottom: "8px",
+                color: "#0f172a",
+                fontSize: "20px",
+              }}
+            >
+              Delete Product
+            </h2>
+            <p
+              style={{
+                color: "#64748b",
+                fontSize: "14px",
+                marginBottom: "24px",
+                lineHeight: "1.5",
+              }}
+            >
+              Are you sure you want to delete{" "}
+              <strong>{productToDelete.name}</strong> from your catalog? This
+              action cannot be undone.
+            </p>
+            <div
+              style={{ display: "flex", justifyContent: "center", gap: "12px" }}
+            >
+              <button
+                onClick={() => {
+                  setIsDeleteModalOpen(false);
+                  setProductToDelete(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "white",
+                  cursor: "pointer",
+                  fontWeight: "bold",
+                  color: "#475569",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeDeleteProduct}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: "#ef4444",
+                  cursor: "pointer",
+                  fontWeight: "bold",
+                  color: "white",
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- WASTE REPORT MODAL --- */}
+      {isWasteModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.7)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "32px",
+              borderRadius: "16px",
+              width: "800px",
+              maxWidth: "90%",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "24px",
+              }}
+            >
+              <h2 style={{ margin: 0 }}>Stock Expiry & Waste Report</h2>
+              <button
+                onClick={() => setIsWasteModalOpen(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: "24px",
+                  cursor: "pointer",
+                  color: "#64748b",
+                }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {wasteReport.length === 0 ? (
+              <p
+                style={{
+                  textAlign: "center",
+                  color: "#94a3b8",
+                  padding: "40px",
+                }}
+              >
+                No waste incidents recorded yet. Great job!
+              </p>
+            ) : (
+              <table className="audit-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Product</th>
+                    <th>Qty Lost</th>
+                    <th>Financial Loss</th>
+                    <th>Carbon (kg)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wasteReport.map((log) => (
+                    <tr key={log.id}>
+                      <td style={{ fontSize: "12px" }}>{log.date}</td>
+                      <td>
+                        <strong>{log.product}</strong>
+                      </td>
+                      <td>{log.qty} Units</td>
+                      <td style={{ color: "#ef4444" }}>₹{log.loss}</td>
+                      <td>{log.carbon} kg CO2e</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div style={{ marginTop: "24px", textAlign: "right" }}>
+              <button
+                onClick={() => window.print()}
+                className="action-btn btn-blue"
+                style={{ border: "none" }}
+              >
+                Print PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const StatCard = ({ title, value, type }) => (
+  <div className={`stat-card ${type}`}>
+    <p className="stat-title">{title}</p>
+    <h3 className="stat-value">{value}</h3>
+  </div>
+);
+
+export default ManagerDashboard;

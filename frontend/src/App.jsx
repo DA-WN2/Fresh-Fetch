@@ -14,15 +14,33 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Orders from "./pages/Orders";
 import Login from "./pages/Login";
-import Register from "./pages/Register"; // Make sure to create this file next
+import Register from "./pages/Register";
+import Profile from "./pages/Profile";
+import ProductPage from "./pages/ProductPage";
+
+// Dashboards
+import ManagerDashboard from "./pages/ManagerDashboard";
+import DeliveryDashboard from "./pages/DeliveryDashboard"; // Make sure this is imported!
 
 function App() {
-  const [cart, setCart] = useState([]);
+  // --- GLOBAL STATE ---
+  const [cart, setCart] = useState(() => {
+    const savedCart = localStorage.getItem("freshfetch_cart");
+    if (savedCart) {
+      return JSON.parse(savedCart);
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem("freshfetch_cart", JSON.stringify(cart));
+  }, [cart]);
+
   const [deals, setDeals] = useState([]);
   const [allProducts, setAllProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Use Case 5: Dynamic Personalization - Fetching data from Django
+  // --- FETCH DATA ---
   const fetchData = () => {
     setLoading(true);
     axios
@@ -42,59 +60,97 @@ function App() {
     fetchData();
   }, []);
 
-  // Use Case 2: Cart Management Logic
-  const addToCart = (product) => {
-    setCart([...cart, { ...product, cartId: Date.now() }]);
+  // --- CART LOGIC ---
+  const addToCart = (product, quantityToAdd = 1) => {
+    setCart((prevCart) => {
+      const existingItem = prevCart.find(
+        (item) => item.product.id === product.id,
+      );
+
+      if (existingItem) {
+        return prevCart.map((item) =>
+          item.product.id === product.id
+            ? { ...item, quantity: item.quantity + quantityToAdd }
+            : item,
+        );
+      }
+      return [...prevCart, { product, quantity: quantityToAdd }];
+    });
   };
 
-  const removeFromCart = (cartId) => {
-    setCart(cart.filter((item) => item.cartId !== cartId));
+  const clearCart = () => setCart([]);
+
+  const removeFromCart = (productId) => {
+    setCart(cart.filter((item) => item.product.id !== productId));
   };
+
+  const totalCartItems = cart.reduce((total, item) => total + item.quantity, 0);
 
   return (
     <Router>
-      <div className="container">
-        {/* Navbar is placed outside Routes to remain visible on all pages */}
-        <Navbar cartCount={cart.length} fetchData={fetchData} />
+      <Routes>
+        {/* =========================================
+            1. ENTERPRISE APPS (FULL SCREEN, NO NAVBAR)
+            ========================================= */}
+        <Route path="/manager-dashboard" element={<ManagerDashboard />} />
 
-        <main className="content">
-          <Routes>
-            {/* Marketplace Home */}
-            <Route
-              path="/"
-              element={
-                <Home
-                  deals={deals}
-                  allProducts={allProducts}
-                  loading={loading}
-                  addToCart={addToCart}
-                />
-              }
-            />
+        {/* THIS IS THE FIX: The exact URL matching Login.jsx */}
+        <Route path="/delivery-portal" element={<DeliveryDashboard />} />
 
-            {/* Shopping & Checkout Flow */}
-            <Route
-              path="/cart"
-              element={<Cart cart={cart} removeFromCart={removeFromCart} />}
-            />
-            <Route
-              path="/checkout"
-              element={<Checkout cart={cart} setCart={setCart} />}
-            />
-            <Route path="/orders" element={<Orders />} />
+        {/* =========================================
+            2. CUSTOMER APP (WITH NAVBAR & CONTAINER)
+            ========================================= */}
+        <Route
+          path="/*"
+          element={
+            <>
+              <Navbar
+                cartCount={totalCartItems}
+                fetchData={fetchData}
+                clearCart={clearCart}
+              />
 
-            {/* Authentication Routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-
-            {/* Future: Add Manager and Delivery Agent Dashboard Routes here */}
-          </Routes>
-        </main>
-
-        <footer>
-          <p>© 2026 Fresh-Fetch | Smart Grocery Solutions</p>
-        </footer>
-      </div>
+              <div className="container">
+                <main className="content">
+                  <Routes>
+                    <Route
+                      path="/"
+                      element={
+                        <Home
+                          cart={cart}
+                          addToCart={addToCart}
+                          clearCart={clearCart}
+                        />
+                      }
+                    />
+                    <Route
+                      path="/cart"
+                      element={
+                        <Cart cart={cart} removeFromCart={removeFromCart} />
+                      }
+                    />
+                    <Route
+                      path="/checkout"
+                      element={<Checkout cart={cart} setCart={setCart} />}
+                    />
+                    <Route path="/orders" element={<Orders />} />
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/register" element={<Register />} />
+                    <Route path="/profile" element={<Profile />} />
+                    <Route
+                      path="/product/:id"
+                      element={<ProductPage addToCart={addToCart} />}
+                    />
+                  </Routes>
+                </main>
+                <footer>
+                  <p>© 2026 Fresh-Fetch | Smart Grocery Solutions</p>
+                </footer>
+              </div>
+            </>
+          }
+        />
+      </Routes>
     </Router>
   );
 }
