@@ -19,6 +19,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   MapPin,
+  User,
+  Phone, // NEW: Imported the Phone icon for contact info
 } from "lucide-react";
 import "../styles/ManagerDashboard.css";
 
@@ -37,6 +39,7 @@ const ManagerDashboard = () => {
   const [orders, setOrders] = useState([]);
   const [impactData, setImpactData] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // --- 2. MODAL STATES ---
@@ -84,21 +87,29 @@ const ManagerDashboard = () => {
     const headers = { Authorization: `Token ${token}` };
 
     try {
-      const [invRes, ordRes, impactRes, suppRes] = await Promise.all([
-        axios.get("http://127.0.0.1:8000/api/manager/inventory/", { headers }),
-        axios.get("http://127.0.0.1:8000/api/manager/orders/", { headers }),
-        axios.get("http://127.0.0.1:8000/api/manager/impact-report/", {
-          headers,
-        }),
-        axios.get("http://127.0.0.1:8000/api/manager/supplier-scores/", {
-          headers,
-        }),
-      ]);
+      const [invRes, ordRes, impactRes, suppRes, agentsRes] = await Promise.all(
+        [
+          axios.get("http://127.0.0.1:8000/api/manager/inventory/", {
+            headers,
+          }),
+          axios.get("http://127.0.0.1:8000/api/manager/orders/", { headers }),
+          axios.get("http://127.0.0.1:8000/api/manager/impact-report/", {
+            headers,
+          }),
+          axios.get("http://127.0.0.1:8000/api/manager/supplier-scores/", {
+            headers,
+          }),
+          axios.get("http://127.0.0.1:8000/api/manager/delivery-agents/", {
+            headers,
+          }),
+        ],
+      );
 
       setInventory(invRes.data);
       setOrders(ordRes.data);
       setImpactData(impactRes.data);
       setSuppliers(suppRes.data);
+      setAgents(agentsRes.data);
       setLoading(false);
     } catch (error) {
       console.error("Dashboard Load Error", error);
@@ -326,7 +337,6 @@ const ManagerDashboard = () => {
     }
   };
 
-  // --- NEW: UPLOAD PACKING PHOTO LOGIC ---
   const handleUploadPhoto = async (orderId, file) => {
     if (!file) return;
 
@@ -356,10 +366,38 @@ const ManagerDashboard = () => {
         ...prev,
       ]);
 
-      // Refresh to update the UI so the checkmark appears!
       fetchDashboardData();
     } catch (err) {
       alert(err.response?.data?.error || "Failed to upload photo.");
+    }
+  };
+
+  const assignAgent = async (orderId) => {
+    const agentId = document.getElementById(`agent-select-${orderId}`).value;
+    if (!agentId) {
+      alert("Please select an available agent from the dropdown first.");
+      return;
+    }
+
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.post(
+        `http://127.0.0.1:8000/api/manager/assign-agent/${orderId}/`,
+        { agent_id: agentId },
+        { headers: { Authorization: `Token ${token}` } },
+      );
+      setNotifications([
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: res.data.message,
+          type: "success",
+        },
+        ...notifications,
+      ]);
+      fetchDashboardData();
+    } catch (err) {
+      alert(err.response?.data?.error || "Failed to assign agent.");
     }
   };
 
@@ -873,7 +911,7 @@ const ManagerDashboard = () => {
               </div>
             )}
 
-            {/* --- UPDATED: ORDERS FULFILLMENT TAB --- */}
+            {/* --- ORDERS FULFILLMENT TAB --- */}
             {activeTab === "ORDERS" && (
               <div
                 style={{
@@ -905,6 +943,73 @@ const ManagerDashboard = () => {
                   </h3>
                 </div>
 
+                {/* DRIVER FLEET STATUS PANEL */}
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    padding: "1.5rem",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    marginBottom: "2.5rem",
+                    display: "flex",
+                    gap: "2rem",
+                    overflowX: "auto",
+                  }}
+                >
+                  <div>
+                    <h4
+                      style={{
+                        margin: "0 0 10px 0",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Delivery Fleet Status
+                    </h4>
+                    <div style={{ display: "flex", gap: "1rem" }}>
+                      {agents.map((agent) => (
+                        <div
+                          key={agent.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            background: "white",
+                            padding: "8px 16px",
+                            borderRadius: "20px",
+                            border: "1px solid var(--border)",
+                            fontSize: "0.85rem",
+                            fontWeight: "600",
+                            color: "var(--text-main)",
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: "10px",
+                              height: "10px",
+                              borderRadius: "50%",
+                              background:
+                                agent.status === "Available"
+                                  ? "#10b981"
+                                  : "#f59e0b",
+                            }}
+                          ></span>
+                          {agent.username}{" "}
+                          <span
+                            style={{
+                              color: "var(--text-muted)",
+                              fontWeight: "normal",
+                            }}
+                          >
+                            ({agent.status})
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 {orders.length === 0 ? (
                   <div
                     className="status-msg"
@@ -921,8 +1026,10 @@ const ManagerDashboard = () => {
                   </div>
                 ) : (
                   orders.map((order) => {
-                    const isShipped = order.status.toLowerCase() === "shipped";
                     const isPending = order.status.toLowerCase() === "pending";
+                    const isDelivered =
+                      order.status.toLowerCase() === "delivered";
+
                     const orderDate = new Date(
                       order.created_at || Date.now(),
                     ).toLocaleDateString("en-US", {
@@ -1019,7 +1126,7 @@ const ManagerDashboard = () => {
                             >
                               {order.status}
                             </span>
-                            {isShipped && (
+                            {!isPending && !isDelivered && (
                               <span
                                 style={{
                                   color: "var(--text-muted)",
@@ -1027,7 +1134,7 @@ const ManagerDashboard = () => {
                                   fontStyle: "italic",
                                 }}
                               >
-                                Awaiting routine confirmation
+                                Awaiting final confirmation
                               </span>
                             )}
                           </div>
@@ -1120,7 +1227,7 @@ const ManagerDashboard = () => {
                             gap: "1.5rem",
                           }}
                         >
-                          {/* 1. CUSTOMER DELIVERY ADDRESS BLOCK */}
+                          {/* 1. CUSTOMER DELIVERY ADDRESS BLOCK WITH PHONE */}
                           <div
                             style={{
                               padding: "1rem",
@@ -1137,7 +1244,7 @@ const ManagerDashboard = () => {
                               color="var(--primary)"
                               style={{ marginTop: "4px" }}
                             />
-                            <div>
+                            <div style={{ width: "100%" }}>
                               <p
                                 style={{
                                   margin: "0 0 6px 0",
@@ -1152,7 +1259,7 @@ const ManagerDashboard = () => {
                               </p>
                               <p
                                 style={{
-                                  margin: 0,
+                                  margin: "0 0 8px 0",
                                   color: "var(--text-main)",
                                   fontSize: "0.95rem",
                                   lineHeight: "1.5",
@@ -1161,6 +1268,24 @@ const ManagerDashboard = () => {
                                 {order.delivery_address ||
                                   "Address details routine"}
                               </p>
+
+                              {/* NEW: Customer Phone Number */}
+                              <div
+                                style={{
+                                  borderTop: "1px dashed var(--border)",
+                                  paddingTop: "8px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  fontSize: "0.85rem",
+                                  color: "var(--text-muted)",
+                                }}
+                              >
+                                <Phone size={14} /> Customer Contact:{" "}
+                                <strong style={{ color: "var(--text-main)" }}>
+                                  {order.customer_phone}
+                                </strong>
+                              </div>
                             </div>
                           </div>
 
@@ -1240,6 +1365,172 @@ const ManagerDashboard = () => {
                             </div>
                           )}
 
+                          {/* --- ASSIGN DELIVERY AGENT BLOCK WITH AGENT PHONE --- */}
+                          {isPending && (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "12px",
+                                borderTop: "1px dashed var(--border)",
+                                paddingTop: "1.5rem",
+                              }}
+                            >
+                              <h5
+                                style={{
+                                  margin: "0",
+                                  color: "var(--text-muted)",
+                                  fontSize: "0.85rem",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "1px",
+                                  fontWeight: "700",
+                                }}
+                              >
+                                Delivery Assignment:
+                              </h5>
+
+                              {order.delivery_agent ? (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    background: "#f0fdfa",
+                                    padding: "10px 14px",
+                                    borderRadius: "6px",
+                                    border: "1px solid #ccfbf1",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "8px",
+                                      color: "var(--primary)",
+                                      fontWeight: "700",
+                                    }}
+                                  >
+                                    <User size={18} /> Assigned:{" "}
+                                    {order.delivery_agent.toUpperCase()}
+                                  </div>
+
+                                  {/* NEW: Driver Phone Number */}
+                                  {order.agent_phone &&
+                                    order.agent_phone !== "Not Provided" && (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "4px",
+                                          fontSize: "0.8rem",
+                                          color: "#0f766e",
+                                          fontWeight: "600",
+                                        }}
+                                      >
+                                        <Phone size={14} /> {order.agent_phone}
+                                      </div>
+                                    )}
+                                </div>
+                              ) : (
+                                <div style={{ display: "flex", gap: "10px" }}>
+                                  <select
+                                    id={`agent-select-${order.id}`}
+                                    style={{
+                                      flex: 1,
+                                      padding: "10px",
+                                      borderRadius: "6px",
+                                      border: "1px solid var(--border)",
+                                      outline: "none",
+                                      fontSize: "0.9rem",
+                                    }}
+                                  >
+                                    <option value="">
+                                      Select Available Agent...
+                                    </option>
+                                    {agents
+                                      .filter((a) => a.status === "Available")
+                                      .map((agent) => (
+                                        <option key={agent.id} value={agent.id}>
+                                          {agent.username}
+                                        </option>
+                                      ))}
+                                  </select>
+                                  <button
+                                    onClick={() => assignAgent(order.id)}
+                                    style={{
+                                      padding: "0 16px",
+                                      background: "#334155",
+                                      color: "white",
+                                      border: "none",
+                                      borderRadius: "6px",
+                                      fontWeight: "600",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    Assign
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* --- 3. PROOF OF DELIVERY BLOCK --- */}
+                          {order.delivery_photo && (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "12px",
+                                borderTop: "1px dashed var(--border)",
+                                paddingTop: "1.5rem",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <h5
+                                  style={{
+                                    margin: "0",
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.85rem",
+                                    textTransform: "uppercase",
+                                    letterSpacing: "1px",
+                                    fontWeight: "700",
+                                  }}
+                                >
+                                  Proof of Delivery:
+                                </h5>
+                                <span
+                                  style={{
+                                    fontSize: "0.8rem",
+                                    color: "#10b981",
+                                    fontWeight: "600",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                  }}
+                                >
+                                  <CheckCircle2 size={16} /> Verified
+                                </span>
+                              </div>
+                              <img
+                                src={order.delivery_photo}
+                                alt="Proof of Delivery"
+                                style={{
+                                  width: "100%",
+                                  height: "200px",
+                                  objectFit: "cover",
+                                  borderRadius: "6px",
+                                  border: "1px solid var(--border)",
+                                }}
+                              />
+                            </div>
+                          )}
+
                           {/* FULFILLMENT CONTROL PANEL BUTTON */}
                           <div
                             style={{
@@ -1253,7 +1544,10 @@ const ManagerDashboard = () => {
                                 onClick={() =>
                                   updateOrderStatus(order.id, "Shipped")
                                 }
-                                disabled={!order.hasUploadedPhoto}
+                                disabled={
+                                  !order.hasUploadedPhoto ||
+                                  !order.delivery_agent
+                                }
                                 style={{
                                   width: "100%",
                                   padding: "12px",
@@ -1266,25 +1560,30 @@ const ManagerDashboard = () => {
                                   alignItems: "center",
                                   gap: "8px",
                                   justifyContent: "center",
-                                  backgroundColor: !order.hasUploadedPhoto
-                                    ? "#e2e8f0"
-                                    : "var(--primary)",
-                                  color: !order.hasUploadedPhoto
-                                    ? "#94a3b8"
-                                    : "white",
-                                  cursor: !order.hasUploadedPhoto
-                                    ? "not-allowed"
-                                    : "pointer",
+                                  backgroundColor:
+                                    !order.hasUploadedPhoto ||
+                                    !order.delivery_agent
+                                      ? "#e2e8f0"
+                                      : "var(--primary)",
+                                  color:
+                                    !order.hasUploadedPhoto ||
+                                    !order.delivery_agent
+                                      ? "#94a3b8"
+                                      : "white",
+                                  cursor:
+                                    !order.hasUploadedPhoto ||
+                                    !order.delivery_agent
+                                      ? "not-allowed"
+                                      : "pointer",
                                   border: "none",
                                   transition: "0.2s",
                                 }}
                               >
-                                <UploadCloud size={18} /> Mark Shipped{" "}
-                                {!order.hasUploadedPhoto &&
-                                  "(Snapshot Required)"}
+                                <UploadCloud size={18} /> Mark Shipped
                               </button>
                             )}
-                            {isShipped && (
+
+                            {!isPending && (
                               <button
                                 disabled
                                 style={{
@@ -1295,9 +1594,11 @@ const ManagerDashboard = () => {
                                   fontWeight: "700",
                                   textTransform: "uppercase",
                                   letterSpacing: "1px",
-                                  background: "white",
-                                  color: "#10b981",
-                                  border: "2px solid #10b981",
+                                  background: isDelivered ? "#10b981" : "white",
+                                  color: isDelivered ? "white" : "#10b981",
+                                  border: isDelivered
+                                    ? "none"
+                                    : "2px solid #10b981",
                                   cursor: "not-allowed",
                                   display: "flex",
                                   justifyContent: "center",
@@ -1305,7 +1606,10 @@ const ManagerDashboard = () => {
                                   alignItems: "center",
                                 }}
                               >
-                                <CheckCircle2 size={18} /> Order Dispatched
+                                <CheckCircle2 size={18} />{" "}
+                                {isDelivered
+                                  ? "Delivery Completed"
+                                  : "Order Dispatched"}
                               </button>
                             )}
                           </div>

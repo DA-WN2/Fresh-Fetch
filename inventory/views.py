@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import JSONParser
 
 # Model and Serializer imports
 from .models import Product, Order, OrderItem, Store, WasteLog, Supplier, RestockOrder, Category
@@ -247,7 +248,11 @@ class ManagerOrdersView(APIView):
                 "created_at": o.created_at,
                 "items": items_data,
                 "delivery_address": o.delivery_address if o.delivery_address else "Pickup Routine",
-                "hasUploadedPhoto": bool(o.packing_photo) # Pass boolean so React can disable "Mark Shipped"
+                "hasUploadedPhoto": bool(o.packing_photo), # Pass boolean so React can disable "Mark Shipped"
+                "delivery_photo": request.build_absolute_uri(o.delivery_photo.url) if o.delivery_photo else None,
+                "delivery_agent": o.delivery_agent.username if o.delivery_agent else None,
+                "customer_phone": getattr(o.user, 'phone_number', 'Not Provided'),
+                "agent_phone": getattr(o.delivery_agent, 'phone_number', 'Not Provided') if o.delivery_agent else None
             })
         return Response(data)
 
@@ -631,7 +636,7 @@ class DeliveryOrdersView(APIView):
         #     return Response({"error": "Access Denied. Delivery agents only."}, status=status.HTTP_403_FORBIDDEN)
 
         # Fetch orders that the manager has Shipped, or the driver is currently delivering
-        orders = Order.objects.filter(status__in=['Shipped', 'Out for Delivery']).order_by('created_at')
+        orders = Order.objects.filter(delivery_agent=request.user, status__in=['Shipped', 'Out for Delivery']).order_by('created_at')
         
         data = []
         for o in orders:
@@ -642,6 +647,7 @@ class DeliveryOrdersView(APIView):
                 "id": o.id,
                 "store_name": o.store.name if o.store else "FreshFetch Fulfillment",
                 "customer_name": o.user.username,
+                "customer_phone": getattr(o.user, 'phone_number', 'Not Provided'),
                 "delivery_address": o.delivery_address,
                 "status": o.status,
                 "total_price": str(round(order_total, 2)),
@@ -650,23 +656,81 @@ class DeliveryOrdersView(APIView):
         return Response(data)
 
 
+
 class DeliveryUpdateStatusView(APIView):
-    """Allows the delivery agent to update the delivery pipeline."""
+    """Allows the delivery agent to update the delivery pipeline and upload proof."""
     permission_classes = [IsAuthenticated]
+    
+    # We need these parsers to accept image files from the delivery app
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
 
     def post(self, request, order_id):
-        # if getattr(request.user, 'role', '') != 'delivery':
-        #     return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
-
         try:
             order = Order.objects.get(id=order_id)
             new_status = request.data.get('status')
             
             if new_status in ['Out for Delivery', 'Delivered']:
                 order.status = new_status
+
+                # --- NEW: If delivered, save the proof photo! ---
+                if new_status == 'Delivered':
+                    photo = request.FILES.get('image')
+                    if photo:
+                        order.delivery_photo = photo
+                    else:
+                        return Response({"error": "Proof of delivery photo is required!"}, status=status.HTTP_400_BAD_REQUEST)
+
                 order.save()
                 return Response({"message": f"Order #{order.id} is now {new_status}!"}, status=status.HTTP_200_OK)
             
             return Response({"error": "Invalid status update."}, status=status.HTTP_400_BAD_REQUEST)
         except Order.DoesNotExist:
             return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+class AvailableDeliveryAgentsView(APIView):
+    """Dynamically calculates which agents are free and which are busy."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', '') != 'manager':
+            return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Fetch all delivery agents
+        agents = User.objects.filter(role__in=['delivery', 'delivery_agent'])
+        data = []
+        
+        for agent in agents:
+            # SMART LOGIC: If they hold an active order, they are busy. If not, they are available!
+            is_busy = Order.objects.filter(delivery_agent=agent, status__in=['Shipped', 'Out for Delivery']).exists()
+            
+            data.append({
+                "id": agent.id,
+                "username": agent.username,
+                "status": "Busy with delivery" if is_busy else "Available"
+            })
+            
+        return Response(data)
+
+class AssignDeliveryAgentView(APIView):
+    """Allows the manager to assign an available driver to an order."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, order_id):
+        if getattr(request.user, 'role', '') != 'manager':
+            return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            order = Order.objects.get(id=order_id, store=request.user.managed_store)
+            agent_id = request.data.get('agent_id')
+            
+            if not agent_id:
+                return Response({"error": "Please select an agent."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            agent = User.objects.get(id=agent_id)
+            order.delivery_agent = agent
+            order.save()
+            
+            return Response({"message": f"Successfully assigned {agent.username} to Order #{order.id}"}, status=status.HTTP_200_OK)
+        
+        except (Order.DoesNotExist, User.DoesNotExist):
+            return Response({"error": "Order or Agent not found."}, status=status.HTTP_404_NOT_FOUND)

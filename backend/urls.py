@@ -24,7 +24,8 @@ from inventory.views import (
     TransferOrderView,
     UploadPackingPhotoView,
     DeliveryOrdersView, 
-    DeliveryUpdateStatusView
+    DeliveryUpdateStatusView,
+    AvailableDeliveryAgentsView, AssignDeliveryAgentView
 )
 
 urlpatterns = [
@@ -68,6 +69,8 @@ urlpatterns = [
     #delivery 
     path('api/delivery/orders/', DeliveryOrdersView.as_view(), name='delivery-orders'),
     path('api/delivery/update-order/<int:order_id>/', DeliveryUpdateStatusView.as_view(), name='delivery-update'), 
+    path('api/manager/delivery-agents/', AvailableDeliveryAgentsView.as_view(), name='delivery-agents'),
+    path('api/manager/assign-agent/<int:order_id>/', AssignDeliveryAgentView.as_view(), name='assign-agent'),
    
 ]
 

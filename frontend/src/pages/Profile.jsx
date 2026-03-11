@@ -1,139 +1,297 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { Link, useNavigate } from "react-router-dom";
-import "../styles/Profile.css";
+import { useNavigate } from "react-router-dom";
+import { User, Mail, Phone, ShieldCheck, LogOut } from "lucide-react";
 
 const Profile = () => {
-  const [profile, setProfile] = useState(null);
-  const [transferCount, setTransferCount] = useState(0); // NEW: State for transfer notifications
+  const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
+    const fetchProfile = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        navigate("/login");
+        return;
+      }
 
-    const headers = {
-      Authorization: `Token ${token}`,
-      "Content-Type": "application/json",
+      try {
+        // Ensure you have an endpoint that returns the user's details!
+        const res = await axios.get(
+          "http://127.0.0.1:8000/api/customer/profile/",
+          {
+            headers: { Authorization: `Token ${token}` },
+          },
+        );
+        setProfileData(res.data);
+        setLoading(false);
+      } catch (err) {
+        console.error("Failed to load profile", err);
+        setLoading(false);
+      }
     };
 
-    // Use Promise.all to fetch profile and orders (to check for transfers) simultaneously
-    Promise.all([
-      axios.get("http://127.0.0.1:8000/api/customer/profile/", { headers }),
-      axios.get("http://127.0.0.1:8000/api/customer/my-orders/", { headers }),
-    ])
-      .then(([profileRes, ordersRes]) => {
-        setProfile(profileRes.data);
-
-        // Use Case: Filter orders where the user is the recipient of a transfer
-        const receivedOrders = ordersRes.data.filter(
-          (order) => order.is_received,
-        );
-        setTransferCount(receivedOrders.length);
-
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Error fetching data:", err);
-        setError("Failed to load account data.");
-        setLoading(false);
-      });
+    fetchProfile();
   }, [navigate]);
 
-  if (loading)
+  const handleLogout = () => {
+    localStorage.clear();
+    navigate("/login");
+  };
+
+  if (loading) {
     return (
-      <div className="profile-container">
-        <div className="status-msg">Loading secure profile...</div>
+      <div
+        style={{
+          textAlign: "center",
+          marginTop: "100px",
+          color: "var(--primary)",
+          fontWeight: "bold",
+        }}
+      >
+        Loading Profile...
       </div>
     );
-  if (error)
-    return (
-      <div className="profile-container">
-        <div className="status-msg error">{error}</div>
-      </div>
-    );
+  }
 
   return (
-    <div className="profile-container">
-      <div className="profile-header">
-        <h2>My Account</h2>
-        <p className="logic-hint">
-          Manage your personal information and preferences.
-        </p>
-      </div>
-
-      {/* NEW: Use Case - Third-Party Access Notification Banner */}
-      {transferCount > 0 && (
-        <div className="profile-notification-banner">
-          <div className="banner-text">
-            <span>🎁</span>
-            <strong>Transfer Alert:</strong> You have {transferCount} new
-            order(s) shared with your account!
-          </div>
-          <Link to="/orders" className="banner-link">
-            View Orders →
-          </Link>
-        </div>
-      )}
-
-      <div className="profile-content">
-        <div className="profile-card">
-          <div className="profile-avatar">
-            {profile.username.charAt(0).toUpperCase()}
-          </div>
-
-          <div className="profile-details">
-            <div className="detail-group">
-              <label>Username</label>
-              <p className="detail-value">{profile.username}</p>
-            </div>
-
-            <div className="detail-group">
-              <label>Email Address</label>
-              <p className="detail-value">{profile.email}</p>
-            </div>
-
-            <div className="detail-group">
-              <label>Account Type</label>
-              <p className="detail-value role-badge">
-                {profile.role.toUpperCase()}
-              </p>
-            </div>
-
-            {profile.date_joined && (
-              <div className="detail-group">
-                <label>Member Since</label>
-                <p className="detail-value">
-                  {new Date(profile.date_joined).toLocaleDateString()}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Quick Links / Actions */}
-        <div className="profile-actions-card">
-          <h3>Quick Links</h3>
-          <Link to="/orders" className="action-btn">
-            📦 View Order History
-          </Link>
-          <Link to="/cart" className="action-btn">
-            🛒 Go to Basket
-          </Link>
-          <button
-            className="action-btn logout-btn"
-            onClick={() => {
-              localStorage.clear();
-              navigate("/login");
-              window.location.reload();
+    <div
+      style={{ maxWidth: "600px", margin: "4rem auto", padding: "0 1.5rem" }}
+    >
+      <div
+        style={{
+          background: "white",
+          borderRadius: "16px",
+          border: "1px solid var(--border)",
+          boxShadow: "0 10px 15px -3px rgba(0,0,0,0.05)",
+          overflow: "hidden",
+        }}
+      >
+        {/* Profile Header Banner */}
+        <div
+          style={{
+            background: "var(--primary)",
+            height: "100px",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              bottom: "-40px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: "80px",
+              height: "80px",
+              backgroundColor: "white",
+              borderRadius: "50%",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
             }}
           >
-            🚪 Logout
+            <User size={40} color="var(--primary)" />
+          </div>
+        </div>
+
+        {/* Profile Info */}
+        <div style={{ padding: "3rem 2rem 2rem 2rem", textAlign: "center" }}>
+          <h2
+            style={{
+              margin: "1rem 0 0 0",
+              color: "var(--text-main)",
+              fontSize: "1.5rem",
+            }}
+          >
+            {profileData?.username?.toUpperCase() ||
+              localStorage.getItem("username")?.toUpperCase()}
+          </h2>
+          <p
+            style={{
+              margin: "4px 0 2rem 0",
+              color: "var(--text-muted)",
+              fontSize: "0.9rem",
+            }}
+          >
+            Fresh-Fetch Member
+          </p>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "1rem",
+              textAlign: "left",
+            }}
+          >
+            {/* Email Field */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "12px 16px",
+                background: "#f8fafc",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+              }}
+            >
+              <div
+                style={{
+                  background: "white",
+                  padding: "8px",
+                  borderRadius: "50%",
+                  display: "flex",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                }}
+              >
+                <Mail size={18} color="#64748b" />
+              </div>
+              <div>
+                <p
+                  style={{
+                    margin: "0",
+                    fontSize: "0.75rem",
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Email Address
+                </p>
+                <p
+                  style={{
+                    margin: "0",
+                    color: "var(--text-main)",
+                    fontWeight: "500",
+                  }}
+                >
+                  {profileData?.email || "No email on file"}
+                </p>
+              </div>
+            </div>
+
+            {/* Phone Number Field */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "12px 16px",
+                background: "#f8fafc",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+              }}
+            >
+              <div
+                style={{
+                  background: "white",
+                  padding: "8px",
+                  borderRadius: "50%",
+                  display: "flex",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                }}
+              >
+                <Phone size={18} color="var(--primary)" />
+              </div>
+              <div>
+                <p
+                  style={{
+                    margin: "0",
+                    fontSize: "0.75rem",
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Contact Number
+                </p>
+                <p
+                  style={{
+                    margin: "0",
+                    color: "var(--text-main)",
+                    fontWeight: "500",
+                  }}
+                >
+                  {profileData?.phone_number || "No number provided"}
+                </p>
+              </div>
+            </div>
+
+            {/* Account Role Field */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "12px 16px",
+                background: "#f8fafc",
+                borderRadius: "8px",
+                border: "1px solid var(--border)",
+              }}
+            >
+              <div
+                style={{
+                  background: "white",
+                  padding: "8px",
+                  borderRadius: "50%",
+                  display: "flex",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                }}
+              >
+                <ShieldCheck size={18} color="#10b981" />
+              </div>
+              <div>
+                <p
+                  style={{
+                    margin: "0",
+                    fontSize: "0.75rem",
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Account Type
+                </p>
+                <p
+                  style={{
+                    margin: "0",
+                    color: "var(--text-main)",
+                    fontWeight: "500",
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {profileData?.role || localStorage.getItem("role")}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            style={{
+              marginTop: "2.5rem",
+              width: "100%",
+              padding: "12px",
+              background: "#fee2e2",
+              color: "#ef4444",
+              border: "1px solid #fca5a5",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              fontSize: "1rem",
+              cursor: "pointer",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "8px",
+              transition: "background 0.2s",
+            }}
+            onMouseOver={(e) => (e.target.style.background = "#fca5a5")}
+            onMouseOut={(e) => (e.target.style.background = "#fee2e2")}
+          >
+            <LogOut size={18} /> Sign Out of Fresh-Fetch
           </button>
         </div>
       </div>

@@ -35,6 +35,7 @@ def dashboard_redirect(request):
 class RegisterView(APIView):
     """
     Handles User Registration and ensures passwords are encrypted.
+    NOW ACCEPTS PHONE NUMBER.
     """
     permission_classes = [AllowAny]
 
@@ -46,17 +47,22 @@ class RegisterView(APIView):
             password = data.get('password', '')
             role = data.get('role', 'customer')
             
+            # --- NEW: Get the phone number from React ---
+            phone_number = data.get('phone_number', '').strip()
+            
             if not username or not password:
                 return Response({"error": "Username and password are required"}, status=status.HTTP_400_BAD_REQUEST)
             
             if User.objects.filter(username=username).exists():
                 return Response({"error": "Username already taken"}, status=status.HTTP_400_BAD_REQUEST)
 
+            # --- NEW: Save the phone number to the database ---
             user = User.objects.create_user(
                 username=username,
                 email=email,
                 password=password,
-                role=role
+                role=role,
+                phone_number=phone_number 
             )
             return Response({"message": "User registered successfully!"}, status=status.HTTP_201_CREATED)
         except Exception as e:
@@ -86,6 +92,7 @@ class LoginView(APIView):
 class UserProfileView(APIView):
     """
     Fetches profile details for the authenticated user.
+    NOW INCLUDES PHONE NUMBER.
     """
     permission_classes = [IsAuthenticated]
 
@@ -95,6 +102,8 @@ class UserProfileView(APIView):
             "username": user.username,
             "email": user.email,
             "role": user.role,
+            # --- NEW: Send the phone number to the Profile.jsx page ---
+            "phone_number": getattr(user, 'phone_number', 'Not Provided'),
             "date_joined": user.date_joined,
         }, status=status.HTTP_200_OK)
 

@@ -9,11 +9,15 @@ import {
   User,
   Camera,
   LogOut,
+  Phone, // Contact icon
 } from "lucide-react";
 
 const DeliveryDashboard = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Track the uploaded photo for each order
+  const [deliveryPhotos, setDeliveryPhotos] = useState({});
   const navigate = useNavigate();
 
   const fetchDeliveryOrders = async () => {
@@ -42,17 +46,39 @@ const DeliveryDashboard = () => {
     fetchDeliveryOrders();
   }, [navigate]);
 
+  const handlePhotoSelect = (orderId, file) => {
+    setDeliveryPhotos((prev) => ({ ...prev, [orderId]: file }));
+  };
+
   const updateStatus = async (orderId, newStatus) => {
     const token = localStorage.getItem("token");
     try {
+      // Use FormData to send both text and files seamlessly
+      const formData = new FormData();
+      formData.append("status", newStatus);
+
+      // If marking as delivered, attach the photo!
+      if (newStatus === "Delivered") {
+        if (!deliveryPhotos[orderId]) {
+          alert("Please upload a Proof of Delivery photo first!");
+          return;
+        }
+        formData.append("image", deliveryPhotos[orderId]);
+      }
+
       await axios.post(
         `http://127.0.0.1:8000/api/delivery/update-order/${orderId}/`,
-        { status: newStatus },
-        { headers: { Authorization: `Token ${token}` } },
+        formData,
+        {
+          headers: {
+            Authorization: `Token ${token}`,
+            "Content-Type": "multipart/form-data", // Required for images
+          },
+        },
       );
       fetchDeliveryOrders(); // Refresh the list
     } catch (err) {
-      alert("Failed to update order status.");
+      alert(err.response?.data?.error || "Failed to update order status.");
     }
   };
 
@@ -205,18 +231,50 @@ const DeliveryDashboard = () => {
                 <div style={{ padding: "1.5rem" }}>
                   {/* CUSTOMER & DESTINATION */}
                   <div style={{ marginBottom: "1.5rem" }}>
+                    {/* NEW: Updated Header with Call Button */}
                     <div
                       style={{
                         display: "flex",
+                        justifyContent: "space-between",
                         alignItems: "center",
-                        gap: "8px",
-                        marginBottom: "8px",
-                        color: "#475569",
+                        marginBottom: "12px",
                       }}
                     >
-                      <User size={16} />{" "}
-                      <strong>{order.customer_name.toUpperCase()}</strong>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          color: "#475569",
+                        }}
+                      >
+                        <User size={16} />{" "}
+                        <strong>{order.customer_name.toUpperCase()}</strong>
+                      </div>
+
+                      {order.customer_phone &&
+                        order.customer_phone !== "Not Provided" && (
+                          <a
+                            href={`tel:${order.customer_phone}`}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              background: "#eff6ff",
+                              color: "#2563eb",
+                              padding: "6px 12px",
+                              borderRadius: "20px",
+                              textDecoration: "none",
+                              fontSize: "0.85rem",
+                              fontWeight: "bold",
+                              border: "1px solid #bfdbfe",
+                            }}
+                          >
+                            <Phone size={14} /> Call Customer
+                          </a>
+                        )}
                     </div>
+
                     <div
                       style={{
                         display: "flex",
@@ -240,7 +298,7 @@ const DeliveryDashboard = () => {
                     </div>
                   </div>
 
-                  {/* PACKING PHOTO (Proof of Package) */}
+                  {/* INITIAL PACKING PHOTO FROM MANAGER */}
                   {order.packing_photo && (
                     <div style={{ marginBottom: "1.5rem" }}>
                       <p
@@ -266,6 +324,46 @@ const DeliveryDashboard = () => {
                           objectFit: "cover",
                           borderRadius: "8px",
                           border: "1px solid #cbd5e1",
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* PROOF OF DELIVERY UPLOAD (Only shows when in transit) */}
+                  {isOutForDelivery && (
+                    <div
+                      style={{
+                        marginBottom: "1.5rem",
+                        padding: "1rem",
+                        backgroundColor: "#f0fdfa",
+                        border: "1px dashed #5eead4",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <p
+                        style={{
+                          margin: "0 0 8px 0",
+                          fontSize: "0.85rem",
+                          color: "#0f766e",
+                          fontWeight: "bold",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                      >
+                        <Camera size={16} /> Upload Proof of Delivery
+                      </p>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment" // Encourages mobile devices to open the camera directly!
+                        onChange={(e) =>
+                          handlePhotoSelect(order.id, e.target.files[0])
+                        }
+                        style={{
+                          width: "100%",
+                          fontSize: "0.9rem",
+                          color: "#334155",
                         }}
                       />
                     </div>
@@ -298,10 +396,13 @@ const DeliveryDashboard = () => {
                   {isOutForDelivery && (
                     <button
                       onClick={() => updateStatus(order.id, "Delivered")}
+                      disabled={!deliveryPhotos[order.id]}
                       style={{
                         width: "100%",
                         padding: "14px",
-                        backgroundColor: "#10b981",
+                        backgroundColor: deliveryPhotos[order.id]
+                          ? "#10b981"
+                          : "#94a3b8",
                         color: "white",
                         border: "none",
                         borderRadius: "8px",
@@ -311,10 +412,16 @@ const DeliveryDashboard = () => {
                         justifyContent: "center",
                         alignItems: "center",
                         gap: "8px",
-                        cursor: "pointer",
+                        cursor: deliveryPhotos[order.id]
+                          ? "pointer"
+                          : "not-allowed",
+                        transition: "0.3s",
                       }}
                     >
-                      <CheckCircle2 size={18} /> Mark as Delivered
+                      <CheckCircle2 size={18} />{" "}
+                      {deliveryPhotos[order.id]
+                        ? "Mark as Delivered"
+                        : "Photo Required to Deliver"}
                     </button>
                   )}
                 </div>

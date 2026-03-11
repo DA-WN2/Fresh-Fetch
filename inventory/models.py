@@ -84,6 +84,9 @@ class Order(models.Model):
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='orders', null=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     packing_photo = models.ImageField(upload_to='packing_photos/', blank=True, null=True)
+    delivery_photo = models.ImageField(upload_to='delivery_photos/', blank=True, null=True)
+
+    delivery_agent = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='assigned_deliveries', on_delete=models.SET_NULL, null=True, blank=True)#new
     delivery_address = models.TextField(blank=True, null=True) 
     created_at = models.DateTimeField(auto_now_add=True)
     is_express = models.BooleanField(default=False) 
