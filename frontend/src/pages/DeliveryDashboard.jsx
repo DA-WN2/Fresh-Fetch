@@ -9,16 +9,27 @@ import {
   User,
   Camera,
   LogOut,
-  Phone, // Contact icon
+  Phone,
+  Store,
+  AlertTriangle,
+  Map,
+  Clock, // <-- Added for Pending State
 } from "lucide-react";
 
 const DeliveryDashboard = () => {
-  const [orders, setOrders] = useState([]);
+  const [routeBatches, setRouteBatches] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Track the uploaded photo for each order
   const [deliveryPhotos, setDeliveryPhotos] = useState({});
+  const [appMessage, setAppMessage] = useState({ text: "", type: "" });
   const navigate = useNavigate();
+
+  const showMessage = (text, type = "error") => {
+    setAppMessage({ text, type });
+    setTimeout(() => {
+      setAppMessage({ text: "", type: "" });
+    }, 4000);
+  };
 
   const fetchDeliveryOrders = async () => {
     const token = localStorage.getItem("token");
@@ -30,14 +41,23 @@ const DeliveryDashboard = () => {
     try {
       const res = await axios.get(
         "http://127.0.0.1:8000/api/delivery/orders/",
-        {
-          headers: { Authorization: `Token ${token}` },
-        },
+        { headers: { Authorization: `Token ${token}` } },
       );
-      setOrders(res.data);
+
+      const orders = res.data;
+
+      // Group orders into batches
+      const groupedOrders = orders.reduce((acc, order) => {
+        const key = order.batch_id || order.id.toString();
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(order);
+        return acc;
+      }, {});
+
+      setRouteBatches(Object.values(groupedOrders));
       setLoading(false);
     } catch (err) {
-      console.error("Failed to load delivery orders", err);
+      console.error("Failed to load delivery routes", err);
       setLoading(false);
     }
   };
@@ -46,39 +66,49 @@ const DeliveryDashboard = () => {
     fetchDeliveryOrders();
   }, [navigate]);
 
-  const handlePhotoSelect = (orderId, file) => {
-    setDeliveryPhotos((prev) => ({ ...prev, [orderId]: file }));
+  const handlePhotoSelect = (batchKey, file) => {
+    setDeliveryPhotos((prev) => ({ ...prev, [batchKey]: file }));
   };
 
-  const updateStatus = async (orderId, newStatus) => {
+  const updateBatchStatus = async (batch, newStatus) => {
     const token = localStorage.getItem("token");
-    try {
-      // Use FormData to send both text and files seamlessly
-      const formData = new FormData();
-      formData.append("status", newStatus);
+    const batchKey = batch[0].batch_id || batch[0].id.toString();
 
-      // If marking as delivered, attach the photo!
-      if (newStatus === "Delivered") {
-        if (!deliveryPhotos[orderId]) {
-          alert("Please upload a Proof of Delivery photo first!");
-          return;
-        }
-        formData.append("image", deliveryPhotos[orderId]);
-      }
-
-      await axios.post(
-        `http://127.0.0.1:8000/api/delivery/update-order/${orderId}/`,
-        formData,
-        {
-          headers: {
-            Authorization: `Token ${token}`,
-            "Content-Type": "multipart/form-data", // Required for images
-          },
-        },
+    if (newStatus === "Delivered" && !deliveryPhotos[batchKey]) {
+      showMessage(
+        "Please upload a Proof of Delivery photo for this route!",
+        "error",
       );
-      fetchDeliveryOrders(); // Refresh the list
+      return;
+    }
+
+    try {
+      await Promise.all(
+        batch.map(async (order) => {
+          const formData = new FormData();
+          formData.append("status", newStatus);
+
+          if (newStatus === "Delivered") {
+            formData.append("image", deliveryPhotos[batchKey]);
+          }
+
+          return axios.post(
+            `http://127.0.0.1:8000/api/delivery/update-order/${order.id}/`,
+            formData,
+            {
+              headers: {
+                Authorization: `Token ${token}`,
+                "Content-Type": "multipart/form-data",
+              },
+            },
+          );
+        }),
+      );
+
+      showMessage(`Route marked as ${newStatus}!`, "success");
+      fetchDeliveryOrders();
     } catch (err) {
-      alert(err.response?.data?.error || "Failed to update order status.");
+      showMessage("Failed to update route status. Check connection.", "error");
     }
   };
 
@@ -92,7 +122,7 @@ const DeliveryDashboard = () => {
           color: "var(--primary)",
         }}
       >
-        Loading Delivery Routes...
+        Loading Consolidated Routes...
       </div>
     );
 
@@ -102,9 +132,40 @@ const DeliveryDashboard = () => {
         backgroundColor: "#f8fafc",
         minHeight: "100vh",
         paddingBottom: "3rem",
+        position: "relative",
       }}
     >
-      {/* HEADER */}
+      {appMessage.text && (
+        <div
+          style={{
+            position: "fixed",
+            top: "20px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor:
+              appMessage.type === "error" ? "#fee2e2" : "#d1fae5",
+            color: appMessage.type === "error" ? "#ef4444" : "#10b981",
+            border: `1px solid ${appMessage.type === "error" ? "#fca5a5" : "#6ee7b7"}`,
+            padding: "12px 24px",
+            borderRadius: "8px",
+            boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            fontWeight: "bold",
+            animation: "fadeIn 0.3s ease-in-out",
+          }}
+        >
+          {appMessage.type === "error" ? (
+            <AlertTriangle size={20} />
+          ) : (
+            <CheckCircle2 size={20} />
+          )}
+          {appMessage.text}
+        </div>
+      )}
+
       <div
         style={{
           backgroundColor: "#0f172a",
@@ -123,7 +184,7 @@ const DeliveryDashboard = () => {
           <div>
             <h1 style={{ margin: 0, fontSize: "1.2rem" }}>Driver Portal</h1>
             <p style={{ margin: 0, fontSize: "0.8rem", color: "#94a3b8" }}>
-              Active Route Assignments
+              Consolidated Route Assignments
             </p>
           </div>
         </div>
@@ -158,7 +219,7 @@ const DeliveryDashboard = () => {
           gap: "1.5rem",
         }}
       >
-        {orders.length === 0 ? (
+        {routeBatches.length === 0 ? (
           <div
             style={{
               textAlign: "center",
@@ -181,26 +242,48 @@ const DeliveryDashboard = () => {
             </p>
           </div>
         ) : (
-          orders.map((order) => {
-            const isReadyForPickup = order.status.toLowerCase() === "shipped";
-            const isOutForDelivery =
-              order.status.toLowerCase() === "out for delivery";
+          routeBatches.map((batch) => {
+            // --- THE FIX: CALCULATE EXACT BATCH READINESS ---
+            // If ANY order is still pending, the driver must wait.
+            const isPending = batch.some((o) =>
+              ["pending", "processing"].includes(o.status.toLowerCase()),
+            );
+            // If ALL orders are shipped, it's ready.
+            const isReadyForPickup = batch.every(
+              (o) => o.status.toLowerCase() === "shipped",
+            );
+            // If it's already in transit
+            const isOutForDelivery = batch.every(
+              (o) => o.status.toLowerCase() === "out for delivery",
+            );
+
+            const customerName = batch[0].customer_name.toUpperCase();
+            const customerPhone = batch[0].customer_phone;
+            const deliveryAddress = batch[0].delivery_address;
+            const batchKey = batch[0].batch_id || batch[0].id.toString();
+            const routeIdDisplay = batch.map((o) => `#${o.id}`).join(" / ");
+            const isMultiStop = batch.length > 1;
 
             return (
               <div
-                key={order.id}
+                key={batchKey}
                 style={{
                   background: "white",
                   borderRadius: "12px",
-                  border: "1px solid #e2e8f0",
+                  border: "2px solid",
+                  borderColor: isMultiStop ? "#8b5cf6" : "#e2e8f0",
                   overflow: "hidden",
                   boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)",
                 }}
               >
-                {/* STATUS BAR */}
+                {/* DYNAMIC STATUS BAR */}
                 <div
                   style={{
-                    background: isReadyForPickup ? "#fef3c7" : "#dbeafe",
+                    background: isPending
+                      ? "#f3f4f6"
+                      : isReadyForPickup
+                        ? "#fef3c7"
+                        : "#dbeafe",
                     padding: "12px 16px",
                     borderBottom: "1px solid #e2e8f0",
                     display: "flex",
@@ -210,130 +293,296 @@ const DeliveryDashboard = () => {
                 >
                   <strong
                     style={{
-                      color: isReadyForPickup ? "#b45309" : "#1e40af",
+                      color: isPending
+                        ? "#475569"
+                        : isReadyForPickup
+                          ? "#b45309"
+                          : "#1e40af",
                       display: "flex",
                       alignItems: "center",
                       gap: "6px",
                     }}
                   >
-                    {isReadyForPickup ? (
+                    {isPending ? (
+                      <Clock size={18} />
+                    ) : isMultiStop ? (
+                      <Map size={18} />
+                    ) : isReadyForPickup ? (
                       <Package size={18} />
                     ) : (
                       <Truck size={18} />
                     )}
-                    {isReadyForPickup ? "Ready for Pickup" : "In Transit"}
+                    {isPending
+                      ? "Waiting for Store Packaging..."
+                      : isMultiStop
+                        ? "Consolidated Multi-Stop Route"
+                        : isReadyForPickup
+                          ? "Ready for Pickup"
+                          : "In Transit"}
                   </strong>
-                  <span style={{ fontWeight: "800", color: "#334155" }}>
-                    #{order.id}
+                  <span
+                    style={{
+                      fontWeight: "800",
+                      color: "#334155",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    {routeIdDisplay}
                   </span>
                 </div>
 
                 <div style={{ padding: "1.5rem" }}>
-                  {/* CUSTOMER & DESTINATION */}
-                  <div style={{ marginBottom: "1.5rem" }}>
-                    {/* NEW: Updated Header with Call Button */}
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: "12px",
-                      }}
-                    >
+                  <h3
+                    style={{
+                      margin: "0 0 1.5rem 0",
+                      fontSize: "1rem",
+                      color: "#0f172a",
+                      textTransform: "uppercase",
+                      letterSpacing: "1px",
+                    }}
+                  >
+                    Navigation Protocol
+                  </h3>
+
+                  {/* LOOP THROUGH ALL PICKUP LOCATIONS */}
+                  {batch.map((stop, i) => {
+                    const isStopReady =
+                      stop.status.toLowerCase() !== "pending" &&
+                      stop.status.toLowerCase() !== "processing";
+
+                    return (
                       <div
+                        key={stop.id}
                         style={{
                           display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          color: "#475569",
+                          alignItems: "flex-start",
+                          gap: "12px",
+                          marginBottom: "1.5rem",
+                          position: "relative",
                         }}
                       >
-                        <User size={16} />{" "}
-                        <strong>{order.customer_name.toUpperCase()}</strong>
-                      </div>
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: "17px",
+                            top: "36px",
+                            bottom: "-30px",
+                            width: "2px",
+                            backgroundColor: "#e2e8f0",
+                            zIndex: 0,
+                          }}
+                        ></div>
 
-                      {order.customer_phone &&
-                        order.customer_phone !== "Not Provided" && (
-                          <a
-                            href={`tel:${order.customer_phone}`}
+                        <div
+                          style={{
+                            background: "#eff6ff",
+                            padding: "8px",
+                            borderRadius: "50%",
+                            color: "#3b82f6",
+                            zIndex: 1,
+                            border: "2px solid white",
+                          }}
+                        >
+                          <Store size={18} />
+                        </div>
+
+                        <div style={{ width: "100%" }}>
+                          <div
                             style={{
                               display: "flex",
+                              justifyContent: "space-between",
+                            }}
+                          >
+                            <p
+                              style={{
+                                margin: "0 0 4px 0",
+                                fontSize: "0.75rem",
+                                color: "#3b82f6",
+                                textTransform: "uppercase",
+                                fontWeight: "900",
+                              }}
+                            >
+                              STOP {i + 1}: PICKUP
+                            </p>
+
+                            {/* INDIVIDUAL STORE STATUS */}
+                            <span
+                              style={{
+                                fontSize: "0.7rem",
+                                fontWeight: "bold",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                color: isStopReady ? "#10b981" : "#f59e0b",
+                              }}
+                            >
+                              {isStopReady ? (
+                                <>
+                                  <CheckCircle2 size={12} /> Packed
+                                </>
+                              ) : (
+                                <>
+                                  <Clock size={12} /> Packing...
+                                </>
+                              )}
+                            </span>
+                          </div>
+
+                          <div
+                            style={{
+                              background: "#f8fafc",
+                              padding: "12px",
+                              borderRadius: "8px",
+                              border: "1px solid #e2e8f0",
+                              opacity: isStopReady ? 1 : 0.6,
+                            }}
+                          >
+                            <p
+                              style={{
+                                margin: "0 0 2px 0",
+                                fontWeight: "bold",
+                                color: "#0f172a",
+                              }}
+                            >
+                              {stop.store_name}
+                            </p>
+                            <p
+                              style={{
+                                margin: "0 0 10px 0",
+                                fontSize: "0.85rem",
+                                color: "#475569",
+                                lineHeight: "1.4",
+                              }}
+                            >
+                              {stop.pickup_address}
+                            </p>
+
+                            {stop.packing_photo && (
+                              <div>
+                                <p
+                                  style={{
+                                    margin: "0 0 4px 0",
+                                    fontSize: "0.7rem",
+                                    color: "#64748b",
+                                    textTransform: "uppercase",
+                                    fontWeight: "bold",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                  }}
+                                >
+                                  <Camera size={12} /> Package ID: #{stop.id}
+                                </p>
+                                <img
+                                  src={stop.packing_photo}
+                                  alt="Package"
+                                  style={{
+                                    width: "100%",
+                                    height: "100px",
+                                    objectFit: "cover",
+                                    borderRadius: "6px",
+                                    border: "1px solid #cbd5e1",
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* FINAL DROPOFF LOCATION */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "12px",
+                      marginTop: "1rem",
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: "#fef2f2",
+                        padding: "8px",
+                        borderRadius: "50%",
+                        color: "#ef4444",
+                        zIndex: 1,
+                        border: "2px solid white",
+                      }}
+                    >
+                      <MapPin size={18} />
+                    </div>
+                    <div style={{ width: "100%" }}>
+                      <p
+                        style={{
+                          margin: "0 0 4px 0",
+                          fontSize: "0.75rem",
+                          color: "#ef4444",
+                          textTransform: "uppercase",
+                          fontWeight: "900",
+                        }}
+                      >
+                        FINAL STOP: DELIVERY
+                      </p>
+                      <div
+                        style={{
+                          backgroundColor: "#fef2f2",
+                          padding: "12px",
+                          borderRadius: "8px",
+                          border: "1px solid #fecaca",
+                          opacity: isPending ? 0.6 : 1,
+                        }}
+                      >
+                        <p
+                          style={{
+                            margin: "0 0 2px 0",
+                            fontWeight: "bold",
+                            color: "#0f172a",
+                          }}
+                        >
+                          {customerName}
+                        </p>
+                        <p
+                          style={{
+                            margin: "0 0 10px 0",
+                            fontSize: "0.9rem",
+                            color: "#475569",
+                            lineHeight: "1.4",
+                          }}
+                        >
+                          {deliveryAddress || "Address not provided"}
+                        </p>
+
+                        {customerPhone && customerPhone !== "Not Provided" && (
+                          <a
+                            href={`tel:${customerPhone}`}
+                            style={{
+                              display: "inline-flex",
                               alignItems: "center",
                               gap: "6px",
-                              background: "#eff6ff",
-                              color: "#2563eb",
+                              background: "white",
+                              color: "#0d9488",
                               padding: "6px 12px",
                               borderRadius: "20px",
                               textDecoration: "none",
                               fontSize: "0.85rem",
                               fontWeight: "bold",
-                              border: "1px solid #bfdbfe",
+                              border: "1px solid #ccfbf1",
                             }}
                           >
                             <Phone size={14} /> Call Customer
                           </a>
                         )}
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "8px",
-                        color: "#334155",
-                        backgroundColor: "#f8fafc",
-                        padding: "12px",
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                      }}
-                    >
-                      <MapPin
-                        size={20}
-                        color="#ef4444"
-                        style={{ marginTop: "2px", flexShrink: 0 }}
-                      />
-                      <span style={{ fontSize: "0.95rem", lineHeight: "1.4" }}>
-                        {order.delivery_address}
-                      </span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* INITIAL PACKING PHOTO FROM MANAGER */}
-                  {order.packing_photo && (
-                    <div style={{ marginBottom: "1.5rem" }}>
-                      <p
-                        style={{
-                          margin: "0 0 8px 0",
-                          fontSize: "0.8rem",
-                          color: "#64748b",
-                          textTransform: "uppercase",
-                          fontWeight: "bold",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                        }}
-                      >
-                        <Camera size={14} /> Package Identifier
-                      </p>
-                      <img
-                        src={order.packing_photo}
-                        alt="Package"
-                        style={{
-                          width: "100%",
-                          height: "200px",
-                          objectFit: "cover",
-                          borderRadius: "8px",
-                          border: "1px solid #cbd5e1",
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  {/* PROOF OF DELIVERY UPLOAD (Only shows when in transit) */}
+                  {/* PROOF OF DELIVERY UPLOAD */}
                   {isOutForDelivery && (
                     <div
                       style={{
-                        marginBottom: "1.5rem",
+                        marginTop: "2rem",
                         padding: "1rem",
                         backgroundColor: "#f0fdfa",
                         border: "1px dashed #5eead4",
@@ -351,14 +600,24 @@ const DeliveryDashboard = () => {
                           gap: "6px",
                         }}
                       >
-                        <Camera size={16} /> Upload Proof of Delivery
+                        <Camera size={16} /> Upload Single Proof of Delivery
+                      </p>
+                      <p
+                        style={{
+                          margin: "0 0 12px 0",
+                          fontSize: "0.75rem",
+                          color: "#475569",
+                        }}
+                      >
+                        Take one photo capturing all packages dropped at the
+                        customer's door.
                       </p>
                       <input
                         type="file"
                         accept="image/*"
-                        capture="environment" // Encourages mobile devices to open the camera directly!
+                        capture="environment"
                         onChange={(e) =>
-                          handlePhotoSelect(order.id, e.target.files[0])
+                          handlePhotoSelect(batchKey, e.target.files[0])
                         }
                         style={{
                           width: "100%",
@@ -369,67 +628,113 @@ const DeliveryDashboard = () => {
                     </div>
                   )}
 
-                  {/* ACTIONS */}
-                  {isReadyForPickup && (
-                    <button
-                      onClick={() => updateStatus(order.id, "Out for Delivery")}
-                      style={{
-                        width: "100%",
-                        padding: "14px",
-                        backgroundColor: "#3b82f6",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "8px",
-                        fontWeight: "bold",
-                        fontSize: "1rem",
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        gap: "8px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <Truck size={18} /> Start Route (Out for Delivery)
-                    </button>
-                  )}
+                  {/* ROUTE ACTIONS */}
+                  <div
+                    style={{
+                      marginTop: "1.5rem",
+                      borderTop: "1px dashed #e2e8f0",
+                      paddingTop: "1.5rem",
+                    }}
+                  >
+                    {/* DISABLED BUTTON: Waiting for stores */}
+                    {isPending && (
+                      <button
+                        disabled
+                        style={{
+                          width: "100%",
+                          padding: "14px",
+                          backgroundColor: "#cbd5e1",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          fontSize: "1rem",
+                          cursor: "not-allowed",
+                        }}
+                      >
+                        Waiting for all stores to pack...
+                      </button>
+                    )}
 
-                  {isOutForDelivery && (
-                    <button
-                      onClick={() => updateStatus(order.id, "Delivered")}
-                      disabled={!deliveryPhotos[order.id]}
-                      style={{
-                        width: "100%",
-                        padding: "14px",
-                        backgroundColor: deliveryPhotos[order.id]
-                          ? "#10b981"
-                          : "#94a3b8",
-                        color: "white",
-                        border: "none",
-                        borderRadius: "8px",
-                        fontWeight: "bold",
-                        fontSize: "1rem",
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        gap: "8px",
-                        cursor: deliveryPhotos[order.id]
-                          ? "pointer"
-                          : "not-allowed",
-                        transition: "0.3s",
-                      }}
-                    >
-                      <CheckCircle2 size={18} />{" "}
-                      {deliveryPhotos[order.id]
-                        ? "Mark as Delivered"
-                        : "Photo Required to Deliver"}
-                    </button>
-                  )}
+                    {/* ENABLED BUTTON: Ready to Start */}
+                    {isReadyForPickup && (
+                      <button
+                        onClick={() =>
+                          updateBatchStatus(batch, "Out for Delivery")
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "14px",
+                          backgroundColor: "#3b82f6",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          fontSize: "1rem",
+                          display: "flex",
+                          justifyContent: "center",
+                          alignItems: "center",
+                          gap: "8px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <Truck size={18} />{" "}
+                        {isMultiStop
+                          ? "All Packages Picked Up (Start Route)"
+                          : "Package Picked Up (Start Route)"}
+                      </button>
+                    )}
+
+                    {/* ENABLED BUTTON: Complete Delivery */}
+                    {isOutForDelivery && (
+                      <button
+                        onClick={() => updateBatchStatus(batch, "Delivered")}
+                        disabled={!deliveryPhotos[batchKey]}
+                        style={{
+                          width: "100%",
+                          padding: "14px",
+                          backgroundColor: deliveryPhotos[batchKey]
+                            ? "#10b981"
+                            : "#94a3b8",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          fontSize: "1rem",
+                          display: "flex",
+                          justifyContent: "center",
+                          alignItems: "center",
+                          gap: "8px",
+                          cursor: deliveryPhotos[batchKey]
+                            ? "pointer"
+                            : "not-allowed",
+                          transition: "0.3s",
+                        }}
+                      >
+                        <CheckCircle2 size={18} />{" "}
+                        {deliveryPhotos[batchKey]
+                          ? "Mark Route Complete"
+                          : "Photo Required to Complete"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @keyframes fadeIn {
+          from { top: 0; opacity: 0; }
+          to { top: 20px; opacity: 1; }
+        }
+      `,
+        }}
+      />
     </div>
   );
 };

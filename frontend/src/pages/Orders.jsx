@@ -16,18 +16,18 @@ import {
   Camera,
   CheckCircle2,
   AlertTriangle,
+  Store,
 } from "lucide-react";
 import "../styles/Marketplace.css";
 
 const Orders = () => {
-  const [orders, setOrders] = useState([]);
+  const [orderBatches, setOrderBatches] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedOrderId, setExpandedOrderId] = useState(null);
+  const [expandedBatchId, setExpandedBatchId] = useState(null);
 
-  // Transfer Modal State
   const [transferModal, setTransferModal] = useState({
     show: false,
-    orderId: null,
+    batch: null,
   });
   const [transferData, setTransferData] = useState({
     username: "",
@@ -35,14 +35,12 @@ const Orders = () => {
   });
   const [transferring, setTransferring] = useState(false);
 
-  // --- NEW: Cancel Confirmation Modal State ---
   const [cancelModal, setCancelModal] = useState({
     show: false,
-    orderId: null,
+    batch: null,
   });
   const [cancelling, setCancelling] = useState(false);
 
-  // Custom In-App Messaging State
   const [appMessage, setAppMessage] = useState({ text: "", type: "" });
 
   useEffect(() => {
@@ -61,9 +59,7 @@ const Orders = () => {
     try {
       const res = await axios.get(
         "http://127.0.0.1:8000/api/customer/orders/",
-        {
-          headers: { Authorization: `Token ${token}` },
-        },
+        { headers: { Authorization: `Token ${token}` } },
       );
 
       let ordersArray = [];
@@ -73,7 +69,18 @@ const Orders = () => {
       else if (res.data.data && Array.isArray(res.data.data))
         ordersArray = res.data.data;
 
-      setOrders(ordersArray);
+      const grouped = ordersArray.reduce((acc, order) => {
+        const key = order.batch_id || order.id.toString();
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(order);
+        return acc;
+      }, {});
+
+      const groupedArray = Object.values(grouped).sort(
+        (a, b) => new Date(b[0].created_at) - new Date(a[0].created_at),
+      );
+
+      setOrderBatches(groupedArray);
       setLoading(false);
     } catch (err) {
       console.error("Failed to load orders:", err);
@@ -81,27 +88,26 @@ const Orders = () => {
     }
   };
 
-  // --- NEW: Execute Cancel Order (Triggered from Custom Modal) ---
   const executeCancelOrder = async () => {
-    if (!cancelModal.orderId) return;
-
+    if (!cancelModal.batch) return;
     setCancelling(true);
     const token = localStorage.getItem("token");
 
     try {
-      await axios.post(
-        `http://127.0.0.1:8000/api/customer/cancel-order/${cancelModal.orderId}/`,
-        {},
-        { headers: { Authorization: `Token ${token}` } },
+      await Promise.all(
+        cancelModal.batch.map((order) =>
+          axios.post(
+            `http://127.0.0.1:8000/api/customer/cancel-order/${order.id}/`,
+            {},
+            { headers: { Authorization: `Token ${token}` } },
+          ),
+        ),
       );
-      showMessage("Order cancelled successfully.", "success");
-      setCancelModal({ show: false, orderId: null });
+      showMessage("Entire order cancelled successfully.", "success");
+      setCancelModal({ show: false, batch: null });
       fetchOrders();
     } catch (err) {
-      showMessage(
-        err.response?.data?.error || "Failed to cancel order.",
-        "error",
-      );
+      showMessage("Failed to cancel order.", "error");
     } finally {
       setCancelling(false);
     }
@@ -112,37 +118,35 @@ const Orders = () => {
       showMessage("Please fill in both fields.", "error");
       return;
     }
-
     setTransferring(true);
     const token = localStorage.getItem("token");
 
     try {
-      await axios.post(
-        `http://127.0.0.1:8000/api/customer/forward-order/${transferModal.orderId}/`,
-        transferData,
-        { headers: { Authorization: `Token ${token}` } },
+      await Promise.all(
+        transferModal.batch.map((order) =>
+          axios.post(
+            `http://127.0.0.1:8000/api/customer/forward-order/${order.id}/`,
+            transferData,
+            { headers: { Authorization: `Token ${token}` } },
+          ),
+        ),
       );
-
       showMessage(
         `Successfully transferred to ${transferData.username}!`,
         "success",
       );
-      setTransferModal({ show: false, orderId: null });
+      setTransferModal({ show: false, batch: null });
       setTransferData({ username: "", address: "" });
       fetchOrders();
     } catch (err) {
-      showMessage(
-        err.response?.data?.error ||
-          "Transfer failed. Please check the username.",
-        "error",
-      );
+      showMessage("Transfer failed. Please check the username.", "error");
     } finally {
       setTransferring(false);
     }
   };
 
-  const toggleOrderDetails = (orderId) => {
-    setExpandedOrderId(expandedOrderId === orderId ? null : orderId);
+  const toggleOrderDetails = (batchKey) => {
+    setExpandedBatchId(expandedBatchId === batchKey ? null : batchKey);
   };
 
   const getStatusIndex = (status) => {
@@ -150,6 +154,7 @@ const Orders = () => {
     if (s === "pending") return 1;
     if (s === "processing") return 2;
     if (s === "shipped") return 3;
+    if (s === "out for delivery") return 3;
     if (s === "delivered") return 4;
     if (s === "cancelled") return -1;
     return 1;
@@ -171,7 +176,6 @@ const Orders = () => {
         position: "relative",
       }}
     >
-      {/* --- IN-APP NOTIFICATION BANNER --- */}
       {appMessage.text && (
         <div
           style={{
@@ -203,7 +207,6 @@ const Orders = () => {
         </div>
       )}
 
-      {/* --- CUSTOM CANCEL CONFIRMATION MODAL --- */}
       {cancelModal.show && (
         <div
           style={{
@@ -251,7 +254,7 @@ const Orders = () => {
                 fontSize: "1.2rem",
               }}
             >
-              Cancel Order #{cancelModal.orderId}?
+              Cancel Order?
             </h3>
             <p
               style={{
@@ -261,12 +264,11 @@ const Orders = () => {
               }}
             >
               This action cannot be undone. Are you sure you want to cancel this
-              order and refund the items to the store?
+              entire order and refund the items?
             </p>
-
             <div style={{ display: "flex", gap: "10px" }}>
               <button
-                onClick={() => setCancelModal({ show: false, orderId: null })}
+                onClick={() => setCancelModal({ show: false, batch: null })}
                 style={{
                   flex: 1,
                   padding: "10px",
@@ -301,7 +303,6 @@ const Orders = () => {
         </div>
       )}
 
-      {/* --- TRANSFER MODAL --- */}
       {transferModal.show && (
         <div
           style={{
@@ -324,12 +325,11 @@ const Orders = () => {
               borderRadius: "12px",
               width: "100%",
               maxWidth: "450px",
-              boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
               position: "relative",
             }}
           >
             <button
-              onClick={() => setTransferModal({ show: false, orderId: null })}
+              onClick={() => setTransferModal({ show: false, batch: null })}
               style={{
                 position: "absolute",
                 top: "16px",
@@ -351,10 +351,8 @@ const Orders = () => {
                 gap: "8px",
               }}
             >
-              <Send size={20} color="var(--primary)" /> Transfer Order #
-              {transferModal.orderId}
+              <Send size={20} color="var(--primary)" /> Transfer Order
             </h3>
-
             <div style={{ marginBottom: "1rem" }}>
               <label
                 style={{
@@ -383,7 +381,6 @@ const Orders = () => {
                 }}
               />
             </div>
-
             <div style={{ marginBottom: "1.5rem" }}>
               <label
                 style={{
@@ -413,7 +410,6 @@ const Orders = () => {
                 }}
               />
             </div>
-
             <button
               onClick={handleTransferSubmit}
               disabled={transferring}
@@ -434,7 +430,6 @@ const Orders = () => {
         </div>
       )}
 
-      {/* HEADER */}
       <div
         style={{
           display: "flex",
@@ -449,7 +444,7 @@ const Orders = () => {
           >
             Your Purchase History
           </h2>
-          <p style={{ color: "var(--text-muted)", marginTop: "8px" }}>
+          <p style={{ color: "var(--text-muted)", margin: "8px 0 0 0" }}>
             View and manage your recent FreshFetch orders.
           </p>
         </div>
@@ -464,11 +459,11 @@ const Orders = () => {
             color: "var(--primary)",
           }}
         >
-          {orders.length} Records Found
+          {orderBatches.length} Orders Found
         </div>
       </div>
 
-      {orders.length === 0 ? (
+      {orderBatches.length === 0 ? (
         <div
           style={{
             textAlign: "center",
@@ -495,14 +490,55 @@ const Orders = () => {
         <div
           style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}
         >
-          {orders.map((order) => {
-            const statusIdx = getStatusIndex(order.status);
+          {orderBatches.map((batch) => {
+            const primaryOrder = batch[0];
+            const batchKey =
+              primaryOrder.batch_id || primaryOrder.id.toString();
+            const isExpanded = expandedBatchId === batchKey;
+
+            const combinedTotal = batch.reduce(
+              (sum, o) => sum + parseFloat(o.total_price),
+              0,
+            );
+            const combinedItems = batch.flatMap((o) => o.items);
+
+            // --- THE FIX: ACCURATE CONVOY STATUS MAPPING ---
+            let currentStatus = "Pending";
+            if (batch.every((o) => o.status.toLowerCase() === "delivered")) {
+              currentStatus = "Delivered";
+            } else if (
+              batch.some(
+                (o) =>
+                  o.status.toLowerCase() === "out for delivery" ||
+                  o.status.toLowerCase() === "delivered",
+              )
+            ) {
+              currentStatus = "Out for Delivery";
+            } else if (
+              batch.every((o) => o.status.toLowerCase() === "shipped")
+            ) {
+              currentStatus = "Shipped";
+            } else if (
+              batch.some((o) => o.status.toLowerCase() === "shipped")
+            ) {
+              currentStatus = "Processing"; // One shipped, one pending = processing
+            }
+
+            const statusIdx = getStatusIndex(currentStatus);
             const isCancelled = statusIdx === -1;
-            const isExpanded = expandedOrderId === order.id;
+            const displayId = batch.map((o) => `#${o.id}`).join(" / ");
+
+            // --- GATHER ALL UPLOADED PHOTOS ---
+            const ordersWithPhotos = batch.filter((o) => o.packing_photo);
+
+            // Find proof of delivery if any driver uploaded it
+            const deliveryProof = batch.find(
+              (o) => o.delivery_photo,
+            )?.delivery_photo;
 
             return (
               <div
-                key={order.id}
+                key={batchKey}
                 style={{
                   background: "var(--card-bg)",
                   borderRadius: "var(--radius-card)",
@@ -517,7 +553,7 @@ const Orders = () => {
                     cursor: "pointer",
                     transition: "background 0.2s",
                   }}
-                  onClick={() => toggleOrderDetails(order.id)}
+                  onClick={() => toggleOrderDetails(batchKey)}
                 >
                   <div
                     style={{
@@ -538,8 +574,8 @@ const Orders = () => {
                           gap: "10px",
                         }}
                       >
-                        ORDER ID #{order.id}
-                        {order.is_transferred && (
+                        ORDER {displayId}
+                        {primaryOrder.is_transferred && (
                           <span
                             style={{
                               fontSize: "0.75rem",
@@ -552,13 +588,11 @@ const Orders = () => {
                               gap: "4px",
                               fontWeight: "700",
                               border: "1px solid #fde68a",
-                              letterSpacing: "0.5px",
                             }}
                           >
-                            <Gift size={12} />
-                            GIFT FROM{" "}
-                            {order.transferred_by
-                              ? order.transferred_by.toUpperCase()
+                            <Gift size={12} /> GIFT FROM{" "}
+                            {primaryOrder.transferred_by
+                              ? primaryOrder.transferred_by.toUpperCase()
                               : "A FRIEND"}
                           </span>
                         )}
@@ -572,9 +606,9 @@ const Orders = () => {
                           gap: "6px",
                         }}
                       >
-                        <Calendar size={14} />{" "}
+                        <Calendar size={14} />
                         {new Date(
-                          order.created_at || Date.now(),
+                          primaryOrder.created_at || Date.now(),
                         ).toLocaleDateString("en-US", {
                           day: "numeric",
                           month: "short",
@@ -592,12 +626,12 @@ const Orders = () => {
                           fontWeight: "700",
                         }}
                       >
-                        Amount Paid
+                        Total Amount Paid
                       </p>
                       <strong
                         style={{ fontSize: "1.4rem", color: "var(--primary)" }}
                       >
-                        ₹{parseFloat(order.total_price).toFixed(2)}
+                        ₹{combinedTotal.toFixed(2)}
                       </strong>
                     </div>
                   </div>
@@ -699,7 +733,7 @@ const Orders = () => {
                     </div>
                   )}
 
-                  {/* ACTION BAR WITH CANCEL AND TRANSFER BUTTONS */}
+                  {/* ACTION BAR */}
                   <div
                     style={{
                       display: "flex",
@@ -715,8 +749,7 @@ const Orders = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              // TRIGGER NEW CUSTOM MODAL HERE
-                              setCancelModal({ show: true, orderId: order.id });
+                              setCancelModal({ show: true, batch: batch });
                             }}
                             style={{
                               background: "white",
@@ -731,14 +764,10 @@ const Orders = () => {
                           >
                             Cancel Order
                           </button>
-
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setTransferModal({
-                                show: true,
-                                orderId: order.id,
-                              });
+                              setTransferModal({ show: true, batch: batch });
                             }}
                             style={{
                               background: "#f0fdfa",
@@ -759,7 +788,6 @@ const Orders = () => {
                         </>
                       )}
                     </div>
-
                     <div
                       style={{
                         display: "flex",
@@ -853,13 +881,13 @@ const Orders = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {order.items && order.items.length > 0 ? (
-                            order.items.map((item, i) => (
+                          {combinedItems && combinedItems.length > 0 ? (
+                            combinedItems.map((item, i) => (
                               <tr
                                 key={i}
                                 style={{
                                   borderBottom:
-                                    i !== order.items.length - 1
+                                    i !== combinedItems.length - 1
                                       ? "1px solid #f1f5f9"
                                       : "none",
                                 }}
@@ -966,7 +994,7 @@ const Orders = () => {
                         >
                           Time:{" "}
                           {new Date(
-                            order.created_at || Date.now(),
+                            primaryOrder.created_at || Date.now(),
                           ).toLocaleTimeString("en-US", {
                             hour: "2-digit",
                             minute: "2-digit",
@@ -993,39 +1021,45 @@ const Orders = () => {
                           }}
                         >
                           <MapPin size={16} color="var(--primary)" />{" "}
-                          Fulfillment
+                          Fulfillment Route
                         </h5>
-                        <p
-                          style={{
-                            margin: "0 0 6px 0",
-                            color: "var(--text-muted)",
-                            fontSize: "0.9rem",
-                          }}
-                        >
-                          Delivery Priority:{" "}
-                          <strong style={{ color: "var(--text-main)" }}>
-                            Standard Routine
-                          </strong>
-                        </p>
-                        <p
-                          style={{
-                            margin: "0",
-                            color: "var(--text-muted)",
-                            fontSize: "0.9rem",
-                          }}
-                        >
-                          Branch:{" "}
-                          <strong style={{ color: "var(--text-main)" }}>
-                            {order.store_name}
-                          </strong>
-                        </p>
+
                         <div
                           style={{
-                            marginTop: "12px",
-                            paddingTop: "12px",
-                            borderTop: "1px dashed var(--border)",
+                            marginBottom: "12px",
+                            paddingBottom: "12px",
+                            borderBottom: "1px dashed var(--border)",
                           }}
                         >
+                          <p
+                            style={{
+                              margin: "0 0 4px 0",
+                              fontSize: "0.8rem",
+                              color: "var(--text-muted)",
+                              textTransform: "uppercase",
+                              fontWeight: "700",
+                            }}
+                          >
+                            Sourced From:
+                          </p>
+                          {batch.map((b) => (
+                            <p
+                              key={b.id}
+                              style={{
+                                margin: "0 0 4px 0",
+                                color: "var(--text-main)",
+                                fontSize: "0.9rem",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                              }}
+                            >
+                              <Store size={14} color="#8b5cf6" /> {b.store_name}
+                            </p>
+                          ))}
+                        </div>
+
+                        <div>
                           <p
                             style={{
                               margin: "0 0 4px 0",
@@ -1045,12 +1079,13 @@ const Orders = () => {
                               lineHeight: "1.4",
                             }}
                           >
-                            {order.delivery_address || "Address not provided"}
+                            {primaryOrder.delivery_address ||
+                              "Address not provided"}
                           </p>
                         </div>
 
-                        {/* PACKING SNAPSHOT BLOCK */}
-                        {order.packing_photo && (
+                        {/* --- THE FIX: RENDER ALL UPLOADED PACKING PHOTOS (MINI GALLERY) --- */}
+                        {ordersWithPhotos.length > 0 && (
                           <div
                             style={{
                               marginTop: "1.5rem",
@@ -1060,7 +1095,7 @@ const Orders = () => {
                           >
                             <p
                               style={{
-                                margin: "0 0 8px 0",
+                                margin: "0 0 12px 0",
                                 fontSize: "0.8rem",
                                 color: "var(--text-muted)",
                                 textTransform: "uppercase",
@@ -1070,19 +1105,94 @@ const Orders = () => {
                                 gap: "6px",
                               }}
                             >
-                              <Camera size={14} /> Pre-Packing Snapshot:
+                              <Camera size={14} /> Security Snapshots:
+                            </p>
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns:
+                                  ordersWithPhotos.length > 1
+                                    ? "1fr 1fr"
+                                    : "1fr",
+                                gap: "10px",
+                              }}
+                            >
+                              {ordersWithPhotos.map((o) => (
+                                <div
+                                  key={`photo-${o.id}`}
+                                  style={{
+                                    padding: "4px",
+                                    border: "1px solid var(--border)",
+                                    background: "white",
+                                    borderRadius: "6px",
+                                  }}
+                                >
+                                  <p
+                                    style={{
+                                      margin: "4px 4px 6px 4px",
+                                      fontSize: "0.75rem",
+                                      color: "var(--text-main)",
+                                      fontWeight: "600",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
+                                  >
+                                    <Store size={12} color="var(--primary)" />
+                                    {o.store_name}
+                                  </p>
+                                  <img
+                                    src={o.packing_photo}
+                                    alt={`Snapshot from ${o.store_name}`}
+                                    style={{
+                                      width: "100%",
+                                      height: "120px",
+                                      objectFit: "cover",
+                                      borderRadius: "4px",
+                                      display: "block",
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* --- RENDER PROOF OF DELIVERY --- */}
+                        {currentStatus === "Delivered" && deliveryProof && (
+                          <div
+                            style={{
+                              marginTop: "1.5rem",
+                              paddingTop: "1.5rem",
+                              borderTop: "1px solid var(--border)",
+                            }}
+                          >
+                            <p
+                              style={{
+                                margin: "0 0 12px 0",
+                                fontSize: "0.8rem",
+                                color: "var(--text-muted)",
+                                textTransform: "uppercase",
+                                fontWeight: "700",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                              }}
+                            >
+                              <CheckCircle2 size={14} color="#10b981" /> Proof
+                              of Delivery:
                             </p>
                             <div
                               style={{
                                 padding: "4px",
-                                border: "1px solid var(--border)",
+                                border: "2px solid #10b981",
                                 background: "white",
                                 borderRadius: "6px",
                               }}
                             >
                               <img
-                                src={order.packing_photo}
-                                alt={`Packing Snapshot for Order #${order.id}`}
+                                src={deliveryProof}
+                                alt="Proof of Delivery"
                                 style={{
                                   width: "100%",
                                   height: "auto",
@@ -1091,16 +1201,6 @@ const Orders = () => {
                                 }}
                               />
                             </div>
-                            <p
-                              style={{
-                                color: "var(--text-muted)",
-                                fontSize: "0.8rem",
-                                fontStyle: "italic",
-                                marginTop: "6px",
-                              }}
-                            >
-                              Verification photo taken before dispatch.
-                            </p>
                           </div>
                         )}
                       </div>
@@ -1112,6 +1212,17 @@ const Orders = () => {
           })}
         </div>
       )}
+
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @keyframes fadeIn {
+          from { top: 0; opacity: 0; }
+          to { top: 20px; opacity: 1; }
+        }
+      `,
+        }}
+      />
     </div>
   );
 };

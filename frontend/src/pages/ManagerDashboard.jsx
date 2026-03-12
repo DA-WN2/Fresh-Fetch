@@ -21,6 +21,7 @@ import {
   MapPin,
   User,
   Phone,
+  RefreshCw,
 } from "lucide-react";
 import "../styles/ManagerDashboard.css";
 
@@ -60,6 +61,11 @@ const ManagerDashboard = () => {
   const [impactData, setImpactData] = useState(null);
   const [suppliers, setSuppliers] = useState([]);
   const [agents, setAgents] = useState([]);
+
+  // --- NEW: Store Profile State ---
+  const [storeProfile, setStoreProfile] = useState({ name: "", address: "" });
+
+  const [pendingEvaluations, setPendingEvaluations] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [restockForms, setRestockForms] = useState({});
@@ -81,6 +87,14 @@ const ManagerDashboard = () => {
 
   // Stores the IDs of products that have active orders
   const [reorderedItems, setReorderedItems] = useState([]);
+
+  const [isEvalModalOpen, setIsEvalModalOpen] = useState(false);
+  const [evalData, setEvalData] = useState({
+    orderId: null,
+    freshness: 10,
+    time_score: 10,
+    price_score: 10,
+  });
 
   // --- 3. API CALLS ---
   const fetchWasteReport = async () => {
@@ -111,38 +125,48 @@ const ManagerDashboard = () => {
     const headers = { Authorization: `Token ${token}` };
 
     try {
-      const [invRes, ordRes, impactRes, suppRes, agentsRes] = await Promise.all(
-        [
-          axios.get("http://127.0.0.1:8000/api/manager/inventory/", {
-            headers,
-          }),
-          axios.get("http://127.0.0.1:8000/api/manager/orders/", { headers }),
-          axios.get("http://127.0.0.1:8000/api/manager/impact-report/", {
-            headers,
-          }),
-          axios.get("http://127.0.0.1:8000/api/manager/supplier-scores/", {
-            headers,
-          }),
-          axios.get("http://127.0.0.1:8000/api/manager/delivery-agents/", {
-            headers,
-          }),
-        ],
-      );
+      // ADDED THE STORE PROFILE ENDPOINT
+      const [
+        invRes,
+        ordRes,
+        impactRes,
+        suppRes,
+        agentsRes,
+        evalRes,
+        profileRes,
+      ] = await Promise.all([
+        axios.get("http://127.0.0.1:8000/api/manager/inventory/", { headers }),
+        axios.get("http://127.0.0.1:8000/api/manager/orders/", { headers }),
+        axios.get("http://127.0.0.1:8000/api/manager/impact-report/", {
+          headers,
+        }),
+        axios.get("http://127.0.0.1:8000/api/manager/supplier-scores/", {
+          headers,
+        }),
+        axios.get("http://127.0.0.1:8000/api/manager/delivery-agents/", {
+          headers,
+        }),
+        axios.get("http://127.0.0.1:8000/api/manager/pending-evaluations/", {
+          headers,
+        }),
+        axios.get("http://127.0.0.1:8000/api/manager/store-profile/", {
+          headers,
+        }),
+      ]);
 
       setInventory(invRes.data);
       setOrders(ordRes.data);
       setImpactData(impactRes.data);
       setSuppliers(suppRes.data);
       setAgents(agentsRes.data);
+      setPendingEvaluations(evalRes.data);
+      setStoreProfile(profileRes.data); // Set store address
 
-      // --- FIX 1: POPULATE REORDERED ITEMS FROM BACKEND ---
-      // The backend now tells us if an item is already pending delivery!
       const activeRestocks = invRes.data
         .filter((item) => item.is_reordered)
         .map((item) => item.id);
 
       setReorderedItems(activeRestocks);
-
       setLoading(false);
     } catch (error) {
       console.error("Dashboard Load Error", error);
@@ -153,6 +177,29 @@ const ManagerDashboard = () => {
   useEffect(() => {
     fetchDashboardData();
   }, [navigate]);
+
+  // --- NEW: Update Store Address API Call ---
+  const updateStoreAddress = async () => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.put(
+        "http://127.0.0.1:8000/api/manager/store-profile/",
+        { address: storeProfile.address },
+        { headers: { Authorization: `Token ${token}` } },
+      );
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: res.data.message,
+          type: "success",
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      alert("Failed to update store address.");
+    }
+  };
 
   // --- 4. CRUD & ACTION OPERATIONS ---
 
@@ -346,7 +393,6 @@ const ManagerDashboard = () => {
     }
   };
 
-  // --- RESTOCK FORM HANDLERS ---
   const handleRestockChange = (productId, field, value) => {
     setRestockForms((prev) => ({
       ...prev,
@@ -364,6 +410,7 @@ const ManagerDashboard = () => {
     const qty = parseInt(formState.quantity) || 50;
     const suppId =
       formState.supplier_id || (suppliers.length > 0 ? suppliers[0].id : null);
+    const targetDate = formState.target_date || "";
 
     if (!suppId) {
       alert("No suppliers available in the system!");
@@ -373,7 +420,12 @@ const ManagerDashboard = () => {
     try {
       const res = await axios.post(
         "http://127.0.0.1:8000/api/manager/trigger-restock/",
-        { product_id: product.id, quantity: qty, supplier_id: suppId },
+        {
+          product_id: product.id,
+          quantity: qty,
+          supplier_id: suppId,
+          target_date: targetDate,
+        },
         { headers: { Authorization: `Token ${token}` } },
       );
       setNotifications((prev) => [
@@ -453,6 +505,36 @@ const ManagerDashboard = () => {
       fetchDashboardData();
     } catch (err) {
       alert(err.response?.data?.error || "Failed to assign agent.");
+    }
+  };
+
+  const submitEvaluation = async () => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.post(
+        `http://127.0.0.1:8000/api/manager/evaluate-supplier/${evalData.orderId}/`,
+        {
+          freshness: evalData.freshness,
+          time_score: evalData.time_score,
+          price_score: evalData.price_score,
+        },
+        { headers: { Authorization: `Token ${token}` } },
+      );
+
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          time: "Just now",
+          message: res.data.message,
+          type: "success",
+        },
+        ...prev,
+      ]);
+
+      setIsEvalModalOpen(false);
+      fetchDashboardData();
+    } catch (err) {
+      alert("Failed to submit evaluation.");
     }
   };
 
@@ -549,6 +631,59 @@ const ManagerDashboard = () => {
                   />
                 </div>
 
+                {/* --- NEW: STORE PICKUP ADDRESS EDITOR --- */}
+                <div
+                  className="dashboard-card"
+                  style={{ marginBottom: "24px" }}
+                >
+                  <h3
+                    className="card-title"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <MapPin color="#3b82f6" size={20} /> Store Pickup Address
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: "14px",
+                      color: "#64748b",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Update your store's address so delivery agents know where to
+                    pick up orders.
+                  </p>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <input
+                      type="text"
+                      value={storeProfile.address || ""}
+                      onChange={(e) =>
+                        setStoreProfile({
+                          ...storeProfile,
+                          address: e.target.value,
+                        })
+                      }
+                      placeholder="Enter full store address (e.g. 123 Main St, Block B)"
+                      style={{
+                        flex: 1,
+                        padding: "10px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border)",
+                        outline: "none",
+                      }}
+                    />
+                    <button
+                      onClick={updateStoreAddress}
+                      className="action-btn btn-blue"
+                    >
+                      Save Address
+                    </button>
+                  </div>
+                </div>
+
                 {lowStockCount > 0 && (
                   <div
                     className="dashboard-card"
@@ -572,6 +707,7 @@ const ManagerDashboard = () => {
                             supplier_id:
                               item.supplier_id ||
                               (suppliers.length > 0 ? suppliers[0].id : ""),
+                            target_date: "",
                           };
 
                           return (
@@ -726,6 +862,43 @@ const ManagerDashboard = () => {
                                         </option>
                                       ))}
                                     </select>
+                                  </div>
+
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      width: "130px",
+                                    }}
+                                  >
+                                    <label
+                                      style={{
+                                        fontSize: "0.7rem",
+                                        color: "#64748b",
+                                        fontWeight: "bold",
+                                        marginBottom: "2px",
+                                      }}
+                                    >
+                                      TARGET DATE
+                                    </label>
+                                    <input
+                                      type="date"
+                                      value={formState.target_date || ""}
+                                      onChange={(e) =>
+                                        handleRestockChange(
+                                          item.id,
+                                          "target_date",
+                                          e.target.value,
+                                        )
+                                      }
+                                      style={{
+                                        padding: "8px",
+                                        borderRadius: "6px",
+                                        border: "1px solid #cbd5e1",
+                                        outline: "none",
+                                        fontSize: "0.9rem",
+                                      }}
+                                    />
                                   </div>
 
                                   <button
@@ -947,37 +1120,97 @@ const ManagerDashboard = () => {
             )}
 
             {activeTab === "SUPPLIERS" && (
-              <div className="dashboard-card">
-                <h3 className="card-title">
-                  <Users color="#8b5cf6" /> Live Supplier Reliability
-                </h3>
-                <div className="supplier-grid">
-                  {suppliers.map((supplier, idx) => (
-                    <div key={idx} className="supplier-item">
-                      <strong>{supplier.name}</strong>
-                      <p
-                        style={{
-                          fontSize: "14px",
-                          color: "#475569",
-                          marginTop: "4px",
-                        }}
-                      >
-                        Score:{" "}
-                        <span
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "24px",
+                }}
+              >
+                <div
+                  className="dashboard-card"
+                  style={{ borderColor: "#f59e0b", borderWidth: "2px" }}
+                >
+                  <h3 className="card-title" style={{ color: "#d97706" }}>
+                    <Bell size={20} /> Pending Delivery Evaluations
+                  </h3>
+                  {pendingEvaluations.length === 0 ? (
+                    <p style={{ color: "#64748b", fontSize: "14px" }}>
+                      All deliveries have been successfully evaluated!
+                    </p>
+                  ) : (
+                    <table className="audit-table">
+                      <thead>
+                        <tr>
+                          <th>Supplier</th>
+                          <th>Product Delivered</th>
+                          <th>Qty</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendingEvaluations.map((ev) => (
+                          <tr key={ev.id}>
+                            <td>
+                              <strong>{ev.supplier_name}</strong>
+                            </td>
+                            <td>{ev.product_name}</td>
+                            <td>{ev.quantity} Units</td>
+                            <td>
+                              <button
+                                className="action-btn btn-yellow"
+                                onClick={() => {
+                                  setEvalData({
+                                    orderId: ev.id,
+                                    freshness: 10,
+                                    time_score: 10,
+                                    price_score: 10,
+                                  });
+                                  setIsEvalModalOpen(true);
+                                }}
+                              >
+                                Evaluate Delivery
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                <div className="dashboard-card">
+                  <h3 className="card-title">
+                    <Users color="#8b5cf6" /> Live Supplier Reliability
+                  </h3>
+                  <div className="supplier-grid">
+                    {suppliers.map((supplier, idx) => (
+                      <div key={idx} className="supplier-item">
+                        <strong>{supplier.name}</strong>
+                        <p
                           style={{
-                            fontWeight: "bold",
-                            color:
-                              supplier.reliability_score > 8
-                                ? "#10b981"
-                                : "#ef4444",
+                            fontSize: "14px",
+                            color: "#475569",
+                            marginTop: "4px",
                           }}
                         >
-                          {supplier.reliability_score}/10
-                        </span>{" "}
-                        ({supplier.status})
-                      </p>
-                    </div>
-                  ))}
+                          Score:{" "}
+                          <span
+                            style={{
+                              fontWeight: "bold",
+                              color:
+                                supplier.reliability_score > 8
+                                  ? "#10b981"
+                                  : "#ef4444",
+                            }}
+                          >
+                            {supplier.reliability_score}/10
+                          </span>{" "}
+                          ({supplier.status})
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -1096,7 +1329,6 @@ const ManagerDashboard = () => {
               </div>
             )}
 
-            {/* --- ORDERS FULFILLMENT TAB --- */}
             {activeTab === "ORDERS" && (
               <div
                 style={{
@@ -1110,25 +1342,57 @@ const ManagerDashboard = () => {
                 <div
                   style={{
                     display: "flex",
+                    justifyContent: "space-between",
                     alignItems: "center",
-                    gap: "10px",
                     marginBottom: "2.5rem",
                   }}
                 >
-                  <Package color="var(--primary)" size={24} />
-                  <h3
+                  <div
                     style={{
-                      margin: 0,
-                      fontSize: "1.25rem",
-                      color: "var(--text-main)",
-                      fontWeight: "700",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
                     }}
                   >
-                    Live Fulfillment Queue
-                  </h3>
+                    <Package color="var(--primary)" size={24} />
+                    <h3
+                      style={{
+                        margin: 0,
+                        fontSize: "1.25rem",
+                        color: "var(--text-main)",
+                        fontWeight: "700",
+                      }}
+                    >
+                      Live Fulfillment Queue
+                    </h3>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      fetchDashboardData();
+                      setNotifications((prev) => [
+                        {
+                          id: Date.now(),
+                          time: "Just now",
+                          message:
+                            "Live Queue Synced: Fetched latest customer orders.",
+                          type: "success",
+                        },
+                        ...prev,
+                      ]);
+                    }}
+                    className="action-btn btn-blue"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "8px 16px",
+                    }}
+                  >
+                    <RefreshCw size={16} /> Sync Latest Orders
+                  </button>
                 </div>
 
-                {/* DRIVER FLEET STATUS PANEL */}
                 <div
                   style={{
                     background: "#f8fafc",
@@ -1244,7 +1508,6 @@ const ManagerDashboard = () => {
                           position: "relative",
                         }}
                       >
-                        {/* Order Header/Status Info */}
                         <div
                           style={{
                             gridColumn: "1 / -1",
@@ -1325,7 +1588,6 @@ const ManagerDashboard = () => {
                           </div>
                         </div>
 
-                        {/* LEFT COLUMN: PACKING LIST */}
                         <div
                           style={{
                             background: "white",
@@ -1400,7 +1662,6 @@ const ManagerDashboard = () => {
                           </div>
                         </div>
 
-                        {/* RIGHT COLUMN: FULFILLMENT ACTIONS */}
                         <div
                           style={{
                             background: "white",
@@ -1471,7 +1732,6 @@ const ManagerDashboard = () => {
                             </div>
                           </div>
 
-                          {/* PACKING SNAPSHOT */}
                           {isPending && (
                             <div
                               style={{
@@ -1546,7 +1806,6 @@ const ManagerDashboard = () => {
                             </div>
                           )}
 
-                          {/* ASSIGN DELIVERY AGENT */}
                           {isPending && (
                             <div
                               style={{
@@ -1653,7 +1912,6 @@ const ManagerDashboard = () => {
                             </div>
                           )}
 
-                          {/* PROOF OF DELIVERY BLOCK */}
                           {order.delivery_photo && (
                             <div
                               style={{
@@ -1851,7 +2109,172 @@ const ManagerDashboard = () => {
         </div>
       </main>
 
-      {/* MODALS */}
+      {/* --- NEW: EVALUATION MODAL --- */}
+      {isEvalModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.7)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "32px",
+              borderRadius: "16px",
+              width: "400px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1)",
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: "8px", color: "#0f172a" }}>
+              Evaluate Delivery
+            </h2>
+            <p
+              style={{
+                color: "#64748b",
+                fontSize: "14px",
+                marginBottom: "20px",
+              }}
+            >
+              Rate this delivery to update the supplier's reliability score.
+            </p>
+
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+            >
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    color: "#64748b",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Freshness & Quality (1-10)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={evalData.freshness}
+                  onChange={(e) =>
+                    setEvalData({ ...evalData, freshness: e.target.value })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    color: "#64748b",
+                    marginBottom: "4px",
+                  }}
+                >
+                  On-Time Delivery (1-10)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={evalData.time_score}
+                  onChange={(e) =>
+                    setEvalData({ ...evalData, time_score: e.target.value })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    color: "#64748b",
+                    marginBottom: "4px",
+                  }}
+                >
+                  Pricing Accuracy (1-10)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={evalData.price_score}
+                  onChange={(e) =>
+                    setEvalData({ ...evalData, price_score: e.target.value })
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                <button
+                  onClick={() => setIsEvalModalOpen(false)}
+                  style={{
+                    flex: 1,
+                    padding: "10px",
+                    background: "white",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                    color: "#475569",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitEvaluation}
+                  style={{
+                    flex: 1,
+                    padding: "10px",
+                    background: "#10b981",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Submit Score
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- ADD/EDIT PRODUCT MODAL --- */}
       {isModalOpen && (
         <div
           style={{

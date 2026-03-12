@@ -14,6 +14,7 @@ class Store(models.Model):
         blank=True,
         related_name='managed_store'
     )
+    address = models.TextField(blank=True, null=True, help_text="Store Pickup Address for Delivery Agents")
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -85,6 +86,7 @@ class Order(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     packing_photo = models.ImageField(upload_to='packing_photos/', blank=True, null=True)
     delivery_photo = models.ImageField(upload_to='delivery_photos/', blank=True, null=True)
+    batch_id = models.CharField(max_length=100, blank=True, null=True, help_text="Groups multi-store orders from a single checkout")
 
     delivery_agent = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='assigned_deliveries', on_delete=models.SET_NULL, null=True, blank=True)#new
     delivery_address = models.TextField(blank=True, null=True) 

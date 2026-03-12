@@ -3,6 +3,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 import datetime
+import uuid
 from collections import defaultdict
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -52,6 +53,9 @@ class CustomerCheckoutView(APIView):
 
         store_item_map = defaultdict(list)
         grand_total = 0
+        
+        # --- Generate a single Batch ID for this entire cart ---
+        current_batch_id = str(uuid.uuid4())
 
         try:
             with transaction.atomic():
@@ -79,7 +83,8 @@ class CustomerCheckoutView(APIView):
                         store=store,
                         user=request.user,
                         delivery_address=delivery_address, 
-                        status="Pending"
+                        status="Pending",
+                        batch_id=current_batch_id # Attach the batch ID to link these orders!
                     )
                     created_order_ids.append(order.id)
 
@@ -116,7 +121,39 @@ class CustomerCheckoutView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# --- MANAGER: INVENTORY CATALOG (CRUD) ---
+# --- MANAGER: INVENTORY CATALOG & STORE PROFILE ---
+
+class ManagerStoreProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', '') != 'manager':
+            return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            store = request.user.managed_store
+            return Response({
+                "id": store.id,
+                "name": store.name,
+                "address": getattr(store, 'address', '')
+            })
+        except Exception:
+            return Response({"error": "No store assigned."}, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request):
+        if getattr(request.user, 'role', '') != 'manager':
+            return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            store = request.user.managed_store
+            new_address = request.data.get('address')
+            if new_address is not None:
+                store.address = new_address
+                store.save()
+                return Response({"message": "Store pickup address updated successfully!"})
+            return Response({"error": "No address provided."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class ManagerInventoryView(APIView):
     """Fetches inventory strictly for the manager's assigned store AND allows creating new products."""
@@ -145,10 +182,9 @@ class ManagerInventoryView(APIView):
             else:
                 expiry_status = "Fresh"
 
-            # --- THE FIX: Check if this item is currently on order from the supplier ---
             is_reordered = RestockOrder.objects.filter(
                 product=p, 
-                status__in=['Pending', 'Shipped'] # If it's pending or shipped, it's incoming!
+                status__in=['Pending', 'Shipped'] 
             ).exists()
 
             data.append({
@@ -162,7 +198,7 @@ class ManagerInventoryView(APIView):
                 "expiry_date": p.expiry_date,
                 "is_near_expiry": p.is_near_expiry,
                 "expiry": expiry_status,
-                "is_reordered": is_reordered # Pass flag to React to keep the checkmark!
+                "is_reordered": is_reordered 
             })
         return Response(data)
 
@@ -419,7 +455,7 @@ class ReportAuditView(APIView):
             return Response({"error": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class TriggerRestockView(APIView):
-    """Allows Manager to order custom quantities from specific suppliers."""
+    """Allows Manager to order custom quantities from specific suppliers with a Target Date."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -429,6 +465,7 @@ class TriggerRestockView(APIView):
         product_id = request.data.get('product_id')
         quantity = int(request.data.get('quantity', 50))
         supplier_id = request.data.get('supplier_id')
+        target_date_str = request.data.get('target_date') 
 
         try:
             product = Product.objects.get(id=product_id)
@@ -438,7 +475,10 @@ class TriggerRestockView(APIView):
             else:
                 return Response({"error": "Please select a supplier."}, status=status.HTTP_400_BAD_REQUEST)
 
-            expected_date = timezone.now().date() + timedelta(days=3)
+            if target_date_str:
+                expected_date = datetime.datetime.strptime(target_date_str, "%Y-%m-%d").date()
+            else:
+                expected_date = timezone.now().date() + timedelta(days=3)
             
             RestockOrder.objects.create(
                 supplier=supplier,
@@ -495,9 +535,7 @@ class SupplierScoresView(APIView):
         if getattr(request.user, 'role', '') != 'manager':
             return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
         
-        # Fetch ALL suppliers from the database
         suppliers = Supplier.objects.all()
-        
         data = []
         for s in suppliers:
             data.append({
@@ -572,18 +610,15 @@ class CustomerOrderHistoryView(APIView):
 
     def get(self, request):
         orders = Order.objects.filter(user=request.user).order_by('-created_at')
-        
         order_data = []
         for order in orders:
             items = OrderItem.objects.filter(order=order)
-            
             item_list = []
             order_total = 0 
             
             for item in items:
                 item_total = float(item.price_at_purchase) * item.quantity
                 order_total += item_total
-                
                 item_list.append({
                     "name": item.product.name,
                     "quantity": item.quantity,
@@ -592,6 +627,9 @@ class CustomerOrderHistoryView(APIView):
             
             order_data.append({
                 "id": order.id,
+                # --- THE FIX: SEND BATCH ID TO CUSTOMER UI FOR GROUPING ---
+                "batch_id": getattr(order, 'batch_id', None) or str(order.id),
+                
                 "store_name": order.store.name if order.store else "FreshFetch Fulfillment",
                 "status": order.status,
                 "total_price": str(round(order_total, 2)), 
@@ -600,6 +638,7 @@ class CustomerOrderHistoryView(APIView):
                 "is_transferred": order.is_transferred,
                 "transferred_by": order.transferred_by, 
                 "packing_photo": request.build_absolute_uri(order.packing_photo.url) if order.packing_photo else None,
+                "delivery_photo": request.build_absolute_uri(order.delivery_photo.url) if order.delivery_photo else None, # ADDED DELIVERY PHOTO HERE!
                 "items": item_list
             })
             
@@ -649,7 +688,7 @@ class TransferOrderView(APIView):
         order.save()
 
         return Response({"message": f"Order #{order.id} successfully transferred to {new_username}!"}, status=status.HTTP_200_OK)
-    
+
 
 # --- DELIVERY AGENT VIEWS ---
 
@@ -658,8 +697,10 @@ class DeliveryOrdersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # Fetch orders assigned to THIS specific driver that are shipped or in transit
-        orders = Order.objects.filter(delivery_agent=request.user, status__in=['Shipped', 'Out for Delivery']).order_by('created_at')
+        # --- THE FIX: Fetch ALL active orders assigned to the driver, including Pending! ---
+        orders = Order.objects.filter(
+            delivery_agent=request.user
+        ).exclude(status__in=['Cancelled', 'Delivered']).order_by('created_at')
         
         data = []
         for o in orders:
@@ -667,7 +708,9 @@ class DeliveryOrdersView(APIView):
             
             data.append({
                 "id": o.id,
+                "batch_id": getattr(o, 'batch_id', None) or str(o.id),
                 "store_name": o.store.name if o.store else "FreshFetch Fulfillment",
+                "pickup_address": getattr(o.store, 'address', 'Address not set') if o.store else "Main Warehouse",
                 "customer_name": o.user.username,
                 "customer_phone": getattr(o.user, 'phone_number', 'Not Provided'),
                 "delivery_address": o.delivery_address,
@@ -676,7 +719,6 @@ class DeliveryOrdersView(APIView):
                 "packing_photo": request.build_absolute_uri(o.packing_photo.url) if o.packing_photo else None,
             })
         return Response(data)
-
 
 
 class DeliveryUpdateStatusView(APIView):
@@ -699,7 +741,6 @@ class DeliveryUpdateStatusView(APIView):
                         order.delivery_photo = photo
                     else:
                         return Response({"error": "Proof of delivery photo is required!"}, status=status.HTTP_400_BAD_REQUEST)
-
                 order.save()
                 return Response({"message": f"Order #{order.id} is now {new_status}!"}, status=status.HTTP_200_OK)
             
@@ -717,20 +758,18 @@ class AvailableDeliveryAgentsView(APIView):
         
         agents = User.objects.filter(role__in=['delivery', 'delivery_agent'])
         data = []
-        
         for agent in agents:
             is_busy = Order.objects.filter(delivery_agent=agent, status__in=['Shipped', 'Out for Delivery']).exists()
-            
             data.append({
                 "id": agent.id,
                 "username": agent.username,
                 "status": "Busy with delivery" if is_busy else "Available"
             })
-            
         return Response(data)
 
+
 class AssignDeliveryAgentView(APIView):
-    """Allows the manager to assign an available driver to an order."""
+    """Allows the manager to assign an available driver. SYNCs to the whole cart batch!"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, order_id):
@@ -745,10 +784,16 @@ class AssignDeliveryAgentView(APIView):
                 return Response({"error": "Please select an agent."}, status=status.HTTP_400_BAD_REQUEST)
             
             agent = User.objects.get(id=agent_id)
-            order.delivery_agent = agent
-            order.save()
             
-            return Response({"message": f"Successfully assigned {agent.username} to Order #{order.id}"}, status=status.HTTP_200_OK)
+            if getattr(order, 'batch_id', None):
+                Order.objects.filter(batch_id=order.batch_id).update(delivery_agent=agent)
+                message = f"Successfully assigned {agent.username} to all parts of this multi-store delivery route!"
+            else:
+                order.delivery_agent = agent
+                order.save()
+                message = f"Successfully assigned {agent.username} to Order #{order.id}"
+            
+            return Response({"message": message}, status=status.HTTP_200_OK)
         
         except (Order.DoesNotExist, User.DoesNotExist):
             return Response({"error": "Order or Agent not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -770,7 +815,6 @@ class SupplierRestockOrdersView(APIView):
             return Response({"error": "Your account is not linked to a Supplier profile in the database."}, status=status.HTTP_400_BAD_REQUEST)
 
         orders = RestockOrder.objects.filter(supplier=supplier_profile).order_by('-id')
-        
         data = []
         for o in orders:
             data.append({
@@ -782,7 +826,6 @@ class SupplierRestockOrdersView(APIView):
                 "store_name": o.product.store.name if o.product.store else "Main Warehouse"
             })
         return Response(data)
-
 
 class UpdateRestockOrderStatusView(APIView):
     """Allows the Supplier to update the shipment status. Auto-adds to store inventory when Delivered!"""
@@ -802,25 +845,18 @@ class UpdateRestockOrderStatusView(APIView):
                     order.status = new_status
                     order.save()
 
-                    # SMART INVENTORY: When supplier delivers, rejuvenate the product!
                     if new_status == 'Delivered':
                         product = order.product
-                        
-                        # 1. Add the new stock
                         product.stock_quantity += order.quantity
                         
-                        # 2. Assign the EXACT expiry date provided by the supplier
                         provided_expiry = request.data.get('expiry_date')
                         if provided_expiry:
                             product.expiry_date = provided_expiry
                         else:
-                            # Fallback just in case (should be blocked by frontend anyway)
                             product.expiry_date = timezone.now().date() + timedelta(days=30)
                         
-                        # 3. Reset Pricing & Flags (Removes any old auto-discounts)
                         product.current_price = product.original_price
                         product.is_near_expiry = False
-                        
                         product.save()
 
                 return Response({"message": f"Restock Order #{order.id} marked as {new_status}!"})
@@ -829,5 +865,60 @@ class UpdateRestockOrderStatusView(APIView):
         
         except RestockOrder.DoesNotExist:
             return Response({"error": "Restock Order not found in database."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PendingEvaluationsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if getattr(request.user, 'role', '') != 'manager':
+            return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            store = request.user.managed_store
+            orders = RestockOrder.objects.filter(product__store=store, status='Delivered')
+            data = []
+            for o in orders:
+                data.append({
+                    "id": o.id,
+                    "supplier_name": o.supplier.name,
+                    "product_name": o.product.name,
+                    "quantity": o.quantity,
+                })
+            return Response(data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+class EvaluateSupplierView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, order_id):
+        if getattr(request.user, 'role', '') != 'manager':
+            return Response({"error": "Access Denied"}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            order = RestockOrder.objects.get(id=order_id)
+            
+            freshness = float(request.data.get('freshness', 10))
+            time_score = float(request.data.get('time_score', 10))
+            price_score = float(request.data.get('price_score', 10))
+            
+            delivery_score = (freshness + time_score + price_score) / 3.0
+            
+            supplier = order.supplier
+            prev_score = float(supplier.reliability_score)
+            
+            supplier.reliability_score = round((prev_score + delivery_score) / 2.0, 1)
+            supplier.save()
+            
+            order.status = "Completed"
+            order.save()
+            
+            return Response({
+                "message": f"Evaluated successfully! {supplier.name}'s new lifetime score is {supplier.reliability_score}/10"
+            })
+
+        except RestockOrder.DoesNotExist:
+            return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -12,7 +12,7 @@ from inventory.views import (
     RunPricingEngineView,
     ReportAuditView,
     EnvironmentalImpactView,
-    SupplierScoresView,  # <-- FIXED: This is required for the Manager Dropdown!
+    SupplierScoresView,
     TriggerRestockView,
     ManagerProductDetailView,
     CustomerCheckoutView,
@@ -27,7 +27,10 @@ from inventory.views import (
     AvailableDeliveryAgentsView, 
     AssignDeliveryAgentView,
     SupplierRestockOrdersView, 
-    UpdateRestockOrderStatusView
+    UpdateRestockOrderStatusView,
+    PendingEvaluationsView,
+    EvaluateSupplierView,
+    ManagerStoreProfileView  # <-- NEW: Imported here!
 )
 
 urlpatterns = [
@@ -52,16 +55,23 @@ urlpatterns = [
     path('api/manager/waste-report/', WasteReportView.as_view(), name='waste-report'),
     path('api/manager/upload-photo/<int:order_id>/', UploadPackingPhotoView.as_view(), name='upload-photo'),
     
+    # --- NEW: Store Profile Route (Pickup Address) ---
+    path('api/manager/store-profile/', ManagerStoreProfileView.as_view(), name='store-profile'),
+    
     # Advanced Enterprise Utilities
     path('api/manager/run-pricing-engine/', RunPricingEngineView.as_view(), name='run-pricing'),
     path('api/manager/report-audit/', ReportAuditView.as_view(), name='report-audit'),
     
-    # NEW: Analytics & Sustainability Reporting
+    # Analytics & Sustainability Reporting
     path('api/manager/impact-report/', EnvironmentalImpactView.as_view(), name='impact-report'),
-    path('api/manager/supplier-scores/', SupplierScoresView.as_view(), name='supplier-scores'), # <-- FIXED
+    path('api/manager/supplier-scores/', SupplierScoresView.as_view(), name='supplier-scores'), 
     path('api/manager/trigger-restock/', TriggerRestockView.as_view(), name='trigger-restock'),
 
     path('api/manager/inventory/<int:pk>/', ManagerProductDetailView.as_view(), name='manager-product-detail'),
+
+    # --- NEW: Evaluation Routes ---
+    path('api/manager/pending-evaluations/', PendingEvaluationsView.as_view(), name='pending-evaluations'),
+    path('api/manager/evaluate-supplier/<int:order_id>/', EvaluateSupplierView.as_view(), name='evaluate-supplier'),
 
     # Supplier 
     path('api/supplier/orders/', SupplierRestockOrdersView.as_view(), name='supplier-orders'),
