@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   Package,
   ShieldAlert,
-  TrendingUp,
   Zap,
   Bell,
   ClipboardList,
@@ -22,13 +21,14 @@ import {
   User,
   Phone,
   RefreshCw,
+  Settings,
 } from "lucide-react";
 import "../styles/ManagerDashboard.css";
 
 const ManagerDashboard = () => {
   const [activeTab, setActiveTab] = useState("OVERVIEW");
 
-  // --- FIX 2: SAVE ACTIVITY LOG TO LOCAL STORAGE ---
+  // --- SAVE ACTIVITY LOG TO LOCAL STORAGE ---
   const [notifications, setNotifications] = useState(() => {
     const saved = localStorage.getItem("manager_notifications");
     if (saved) {
@@ -62,8 +62,13 @@ const ManagerDashboard = () => {
   const [suppliers, setSuppliers] = useState([]);
   const [agents, setAgents] = useState([]);
 
-  // --- NEW: Store Profile State ---
-  const [storeProfile, setStoreProfile] = useState({ name: "", address: "" });
+  // Store Profile State
+  const [storeProfile, setStoreProfile] = useState({
+    name: "",
+    address: "",
+    latitude: null,
+    longitude: null,
+  });
 
   const [pendingEvaluations, setPendingEvaluations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -125,7 +130,6 @@ const ManagerDashboard = () => {
     const headers = { Authorization: `Token ${token}` };
 
     try {
-      // ADDED THE STORE PROFILE ENDPOINT
       const [
         invRes,
         ordRes,
@@ -160,7 +164,7 @@ const ManagerDashboard = () => {
       setSuppliers(suppRes.data);
       setAgents(agentsRes.data);
       setPendingEvaluations(evalRes.data);
-      setStoreProfile(profileRes.data); // Set store address
+      setStoreProfile(profileRes.data);
 
       const activeRestocks = invRes.data
         .filter((item) => item.is_reordered)
@@ -178,13 +182,46 @@ const ManagerDashboard = () => {
     fetchDashboardData();
   }, [navigate]);
 
-  // --- NEW: Update Store Address API Call ---
+  // --- FETCH GPS FUNCTION ---
+  const captureStoreGPS = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setStoreProfile((prev) => ({
+          ...prev,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        }));
+        setNotifications((prev) => [
+          {
+            id: Date.now(),
+            time: "Just now",
+            message: "New GPS coordinates captured! Remember to click Save.",
+            type: "success",
+          },
+          ...prev,
+        ]);
+      },
+      (error) => {
+        alert("Please allow location access in your browser to capture GPS.");
+      },
+    );
+  };
+
+  // --- Update Store Address API Call ---
   const updateStoreAddress = async () => {
     const token = localStorage.getItem("token");
     try {
       const res = await axios.put(
         "http://127.0.0.1:8000/api/manager/store-profile/",
-        { address: storeProfile.address },
+        {
+          address: storeProfile.address,
+          latitude: storeProfile.latitude,
+          longitude: storeProfile.longitude,
+        },
         { headers: { Authorization: `Token ${token}` } },
       );
       setNotifications((prev) => [
@@ -197,7 +234,7 @@ const ManagerDashboard = () => {
         ...prev,
       ]);
     } catch (err) {
-      alert("Failed to update store address.");
+      alert("Failed to update store location profile.");
     }
   };
 
@@ -590,6 +627,14 @@ const ManagerDashboard = () => {
           >
             <Leaf size={20} /> Sustainability
           </button>
+
+          {/* --- STORE SETTINGS TAB --- */}
+          <button
+            className={`sidebar-btn ${activeTab === "SETTINGS" ? "active" : ""}`}
+            onClick={() => setActiveTab("SETTINGS")}
+          >
+            <Settings size={20} /> Store Settings
+          </button>
         </nav>
       </aside>
 
@@ -629,59 +674,6 @@ const ManagerDashboard = () => {
                     value={`${impactData?.sustainability_score || 100}/100`}
                     type="success"
                   />
-                </div>
-
-                {/* --- NEW: STORE PICKUP ADDRESS EDITOR --- */}
-                <div
-                  className="dashboard-card"
-                  style={{ marginBottom: "24px" }}
-                >
-                  <h3
-                    className="card-title"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    <MapPin color="#3b82f6" size={20} /> Store Pickup Address
-                  </h3>
-                  <p
-                    style={{
-                      fontSize: "14px",
-                      color: "#64748b",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    Update your store's address so delivery agents know where to
-                    pick up orders.
-                  </p>
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <input
-                      type="text"
-                      value={storeProfile.address || ""}
-                      onChange={(e) =>
-                        setStoreProfile({
-                          ...storeProfile,
-                          address: e.target.value,
-                        })
-                      }
-                      placeholder="Enter full store address (e.g. 123 Main St, Block B)"
-                      style={{
-                        flex: 1,
-                        padding: "10px",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border)",
-                        outline: "none",
-                      }}
-                    />
-                    <button
-                      onClick={updateStoreAddress}
-                      className="action-btn btn-blue"
-                    >
-                      Save Address
-                    </button>
-                  </div>
                 </div>
 
                 {lowStockCount > 0 && (
@@ -951,6 +943,145 @@ const ManagerDashboard = () => {
                   </p>
                 </div>
               </>
+            )}
+
+            {/* --- UPDATED: STORE SETTINGS TAB CONTENT --- */}
+            {activeTab === "SETTINGS" && (
+              <div className="dashboard-card">
+                <h3
+                  className="card-title"
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
+                  <MapPin color="#3b82f6" size={20} /> Store Location Profile
+                </h3>
+                <p
+                  style={{
+                    fontSize: "14px",
+                    color: "#64748b",
+                    marginBottom: "12px",
+                  }}
+                >
+                  Update your store's address and exact GPS coordinates. You can
+                  re-fetch your GPS at any time if your store moves.
+                </p>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "16px",
+                    marginTop: "20px",
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "12px",
+                        fontWeight: "bold",
+                        color: "#64748b",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      Store Pickup Address
+                    </label>
+                    <input
+                      type="text"
+                      value={storeProfile.address || ""}
+                      onChange={(e) =>
+                        setStoreProfile({
+                          ...storeProfile,
+                          address: e.target.value,
+                        })
+                      }
+                      placeholder="Enter full store address (e.g. 123 Main St, Block B)"
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border)",
+                        outline: "none",
+                        boxSizing: "border-box",
+                        fontSize: "0.95rem",
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "10px",
+                      alignItems: "center",
+                    }}
+                  >
+                    <button
+                      onClick={captureStoreGPS}
+                      style={{
+                        padding: "12px 20px",
+                        background: "#f0fdfa",
+                        color: "#0d9488",
+                        border: "1px solid #ccfbf1",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        transition: "0.2s",
+                      }}
+                    >
+                      <MapPin size={18} />{" "}
+                      {storeProfile.latitude
+                        ? "Re-fetch GPS Location"
+                        : "Fetch Exact GPS"}
+                    </button>
+
+                    <button
+                      onClick={updateStoreAddress}
+                      className="action-btn btn-blue"
+                      style={{ flex: 1, padding: "12px", fontSize: "1rem" }}
+                    >
+                      Save & Update Profile
+                    </button>
+                  </div>
+
+                  {storeProfile.latitude && (
+                    <div
+                      style={{
+                        padding: "12px",
+                        background: "#f8fafc",
+                        border: "1px dashed #cbd5e1",
+                        borderRadius: "6px",
+                      }}
+                    >
+                      <p
+                        style={{
+                          fontSize: "13px",
+                          color: "#10b981",
+                          margin: 0,
+                          fontWeight: "bold",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                      >
+                        <CheckCircle2 size={14} /> Active GPS Coordinates Ready
+                      </p>
+                      <p
+                        style={{
+                          margin: "4px 0 0 0",
+                          color: "#475569",
+                          fontSize: "13px",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        Latitude: {storeProfile.latitude.toFixed(6)} |
+                        Longitude: {storeProfile.longitude.toFixed(6)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
 
             {activeTab === "CATALOG" && (
@@ -2109,7 +2240,7 @@ const ManagerDashboard = () => {
         </div>
       </main>
 
-      {/* --- NEW: EVALUATION MODAL --- */}
+      {/* --- EVALUATION MODAL --- */}
       {isEvalModalOpen && (
         <div
           style={{

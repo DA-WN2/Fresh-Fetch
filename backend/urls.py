@@ -4,6 +4,7 @@ from .views import dashboard_redirect
 from django.conf import settings
 from django.conf.urls.static import static
 
+
 # Import all Manager views including the new analytics tools
 from inventory.views import (
     ManagerInventoryView, 
@@ -30,7 +31,11 @@ from inventory.views import (
     UpdateRestockOrderStatusView,
     PendingEvaluationsView,
     EvaluateSupplierView,
-    ManagerStoreProfileView  # <-- NEW: Imported here!
+    ManagerStoreProfileView,
+    UpdateAgentLocationView, 
+    TrackOrderView,
+    CustomerAddressView,
+    DeleteCustomerAddressView
 )
 
 urlpatterns = [
@@ -85,6 +90,12 @@ urlpatterns = [
     path('api/delivery/update-order/<int:order_id>/', DeliveryUpdateStatusView.as_view(), name='delivery-update'), 
     path('api/manager/delivery-agents/', AvailableDeliveryAgentsView.as_view(), name='delivery-agents'),
     path('api/manager/assign-agent/<int:order_id>/', AssignDeliveryAgentView.as_view(), name='assign-agent'),
+    path('api/delivery/update-location/', UpdateAgentLocationView.as_view(), name='update-location'),
+    path('api/tracking/<str:batch_id>/', TrackOrderView.as_view(), name='track-order'),
+    path('api/customer/addresses/', CustomerAddressView.as_view(), name='customer-addresses'),
+    path('api/customer/addresses/<int:pk>/', DeleteCustomerAddressView.as_view(), name='delete-address'),
+
+    
    
 ]
 

@@ -17,8 +17,51 @@ import {
   CheckCircle2,
   AlertTriangle,
   Store,
+  Navigation,
+  Truck,
+  Clock,
 } from "lucide-react";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Polyline,
+  useMap,
+} from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import "../styles/Marketplace.css";
+
+const truckIcon = new L.divIcon({
+  html: '<div style="font-size: 20px; background: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border: 2px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">🚚</div>',
+  className: "custom-div-icon",
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+});
+const storeIcon = new L.divIcon({
+  html: '<div style="font-size: 18px; background: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 2px solid #f59e0b; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">🏪</div>',
+  className: "custom-div-icon",
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+const homeIcon = new L.divIcon({
+  html: '<div style="font-size: 18px; background: white; border-radius: 50%; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 2px solid #ef4444; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">🏠</div>',
+  className: "custom-div-icon",
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+function FitMapBounds({ coords }) {
+  const map = useMap();
+  useEffect(() => {
+    if (coords && coords.length > 1) {
+      const bounds = L.latLngBounds(coords);
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [coords, map]);
+  return null;
+}
 
 const Orders = () => {
   const [orderBatches, setOrderBatches] = useState([]);
@@ -35,17 +78,30 @@ const Orders = () => {
   });
   const [transferring, setTransferring] = useState(false);
 
-  const [cancelModal, setCancelModal] = useState({
-    show: false,
-    batch: null,
-  });
+  const [cancelModal, setCancelModal] = useState({ show: false, batch: null });
   const [cancelling, setCancelling] = useState(false);
 
   const [appMessage, setAppMessage] = useState({ text: "", type: "" });
+  const [trackingData, setTrackingData] = useState(null);
+  const [agentLocations, setAgentLocations] = useState({});
+  const [routePaths, setRoutePaths] = useState({});
+
+  // --- NEW: ETA STATE ---
+  const [etas, setEtas] = useState({});
 
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  useEffect(() => {
+    let interval;
+    if (expandedBatchId && trackingData) {
+      interval = setInterval(() => {
+        fetchAgentLocation(expandedBatchId);
+      }, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [expandedBatchId, trackingData]);
 
   const showMessage = (text, type = "error") => {
     setAppMessage({ text, type });
@@ -83,16 +139,104 @@ const Orders = () => {
       setOrderBatches(groupedArray);
       setLoading(false);
     } catch (err) {
-      console.error("Failed to load orders:", err);
       setLoading(false);
     }
   };
+
+  const fetchTrackingData = async (batchId) => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(
+        `http://127.0.0.1:8000/api/tracking/${batchId}/`,
+        { headers: { Authorization: `Token ${token}` } },
+      );
+      setTrackingData(res.data);
+      fetchAgentLocation(batchId, true);
+    } catch (err) {}
+  };
+
+  const fetchAgentLocation = async (batchId, silent = false) => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await axios.get(
+        `http://127.0.0.1:8000/api/tracking/${batchId}/`,
+        { headers: { Authorization: `Token ${token}` } },
+      );
+      if (res.data && res.data.agent && res.data.agent.lat) {
+        setAgentLocations((prev) => ({
+          ...prev,
+          [batchId]: { lat: res.data.agent.lat, lng: res.data.agent.lng },
+        }));
+      }
+    } catch (err) {
+      if (!silent) console.log("Waiting for driver to share GPS...");
+    }
+  };
+
+  // --- MAP ROUTING & ETA CALCULATION ---
+  useEffect(() => {
+    if (!expandedBatchId || !trackingData) return;
+
+    const batchId = expandedBatchId;
+    const batch = orderBatches.find(
+      (b) => (b[0].batch_id || b[0].id.toString()) === batchId,
+    );
+    if (!batch) return;
+
+    const primaryOrder = batch[0];
+
+    const targetLat = primaryOrder?.delivery_lat || trackingData?.customer?.lat;
+    const targetLng = primaryOrder?.delivery_lng || trackingData?.customer?.lng;
+
+    const storeLat = trackingData?.stores?.[0]?.lat;
+    const storeLng = trackingData?.stores?.[0]?.lng;
+
+    const dLat =
+      agentLocations[batchId]?.lat ||
+      trackingData?.agent?.lat ||
+      storeLat ||
+      9.5785;
+    const dLng =
+      agentLocations[batchId]?.lng ||
+      trackingData?.agent?.lng ||
+      storeLng ||
+      76.618;
+
+    // Only fetch if we have coordinates and haven't fetched this route recently
+    if (targetLat && targetLng && dLat && dLng && !routePaths[batchId]) {
+      const fetchRoute = async () => {
+        try {
+          const coords = `${dLng},${dLat};${targetLng},${targetLat}`;
+          const res = await fetch(
+            `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`,
+          );
+
+          if (!res.ok) throw new Error("OSRM Failed");
+
+          const data = await res.json();
+          if (data.routes && data.routes.length > 0) {
+            // 1. Draw the Route
+            const leafletCoords = data.routes[0].geometry.coordinates.map(
+              (c) => [c[1], c[0]],
+            );
+            setRoutePaths((prev) => ({ ...prev, [batchId]: leafletCoords }));
+
+            // 2. Calculate the ETA!
+            // OSRM returns duration in seconds. Convert to minutes.
+            const durationSeconds = data.routes[0].duration;
+            const durationMins = Math.ceil(durationSeconds / 60);
+            setEtas((prev) => ({ ...prev, [batchId]: durationMins }));
+          }
+        } catch (err) {}
+      };
+      fetchRoute();
+    }
+  }, [agentLocations, expandedBatchId, orderBatches, routePaths, trackingData]);
 
   const executeCancelOrder = async () => {
     if (!cancelModal.batch) return;
     setCancelling(true);
     const token = localStorage.getItem("token");
-
     try {
       await Promise.all(
         cancelModal.batch.map((order) =>
@@ -120,7 +264,6 @@ const Orders = () => {
     }
     setTransferring(true);
     const token = localStorage.getItem("token");
-
     try {
       await Promise.all(
         transferModal.batch.map((order) =>
@@ -145,8 +288,18 @@ const Orders = () => {
     }
   };
 
-  const toggleOrderDetails = (batchKey) => {
-    setExpandedBatchId(expandedBatchId === batchKey ? null : batchKey);
+  const toggleOrderDetails = (batchKey, currentStatus) => {
+    if (expandedBatchId === batchKey) {
+      setExpandedBatchId(null);
+      setTrackingData(null);
+    } else {
+      setExpandedBatchId(batchKey);
+      if (currentStatus === "Out for Delivery") {
+        fetchTrackingData(batchKey);
+      } else {
+        setTrackingData(null);
+      }
+    }
   };
 
   const getStatusIndex = (status) => {
@@ -202,11 +355,12 @@ const Orders = () => {
             <AlertTriangle size={20} />
           ) : (
             <CheckCircle2 size={20} />
-          )}
+          )}{" "}
           {appMessage.text}
         </div>
       )}
 
+      {/* CANCEL MODAL */}
       {cancelModal.show && (
         <div
           style={{
@@ -303,6 +457,7 @@ const Orders = () => {
         </div>
       )}
 
+      {/* TRANSFER MODAL */}
       {transferModal.show && (
         <div
           style={{
@@ -495,46 +650,54 @@ const Orders = () => {
             const batchKey =
               primaryOrder.batch_id || primaryOrder.id.toString();
             const isExpanded = expandedBatchId === batchKey;
-
             const combinedTotal = batch.reduce(
               (sum, o) => sum + parseFloat(o.total_price),
               0,
             );
             const combinedItems = batch.flatMap((o) => o.items);
 
-            // --- THE FIX: ACCURATE CONVOY STATUS MAPPING ---
             let currentStatus = "Pending";
-            if (batch.every((o) => o.status.toLowerCase() === "delivered")) {
+            if (batch.every((o) => o.status.toLowerCase() === "delivered"))
               currentStatus = "Delivered";
-            } else if (
+            else if (
               batch.some(
                 (o) =>
                   o.status.toLowerCase() === "out for delivery" ||
                   o.status.toLowerCase() === "delivered",
               )
-            ) {
+            )
               currentStatus = "Out for Delivery";
-            } else if (
-              batch.every((o) => o.status.toLowerCase() === "shipped")
-            ) {
+            else if (batch.every((o) => o.status.toLowerCase() === "shipped"))
               currentStatus = "Shipped";
-            } else if (
-              batch.some((o) => o.status.toLowerCase() === "shipped")
-            ) {
-              currentStatus = "Processing"; // One shipped, one pending = processing
-            }
+            else if (batch.some((o) => o.status.toLowerCase() === "shipped"))
+              currentStatus = "Processing";
 
             const statusIdx = getStatusIndex(currentStatus);
             const isCancelled = statusIdx === -1;
             const displayId = batch.map((o) => `#${o.id}`).join(" / ");
-
-            // --- GATHER ALL UPLOADED PHOTOS ---
             const ordersWithPhotos = batch.filter((o) => o.packing_photo);
 
-            // Find proof of delivery if any driver uploaded it
-            const deliveryProof = batch.find(
-              (o) => o.delivery_photo,
-            )?.delivery_photo;
+            const streetRoute = routePaths[batchKey];
+            const estimatedMins = etas[batchKey];
+
+            const customerLat =
+              primaryOrder.delivery_lat || trackingData?.customer?.lat;
+            const customerLng =
+              primaryOrder.delivery_lng || trackingData?.customer?.lng;
+
+            const storeLat = trackingData?.stores?.[0]?.lat;
+            const storeLng = trackingData?.stores?.[0]?.lng;
+
+            const driverLat =
+              agentLocations[batchKey]?.lat ||
+              trackingData?.agent?.lat ||
+              storeLat ||
+              9.5785;
+            const driverLng =
+              agentLocations[batchKey]?.lng ||
+              trackingData?.agent?.lng ||
+              storeLng ||
+              76.618;
 
             return (
               <div
@@ -553,7 +716,7 @@ const Orders = () => {
                     cursor: "pointer",
                     transition: "background 0.2s",
                   }}
-                  onClick={() => toggleOrderDetails(batchKey)}
+                  onClick={() => toggleOrderDetails(batchKey, currentStatus)}
                 >
                   <div
                     style={{
@@ -636,7 +799,6 @@ const Orders = () => {
                     </div>
                   </div>
 
-                  {/* PROGRESS BAR */}
                   {!isCancelled ? (
                     <div
                       style={{
@@ -733,7 +895,6 @@ const Orders = () => {
                     </div>
                   )}
 
-                  {/* ACTION BAR */}
                   <div
                     style={{
                       display: "flex",
@@ -808,7 +969,6 @@ const Orders = () => {
                   </div>
                 </div>
 
-                {/* --- EXPANDED DETAILS SECTION --- */}
                 {isExpanded && (
                   <div
                     style={{
@@ -817,6 +977,184 @@ const Orders = () => {
                       borderTop: "1px solid var(--border)",
                     }}
                   >
+                    {currentStatus === "Out for Delivery" &&
+                      !customerLat &&
+                      !customerLng && (
+                        <div
+                          style={{
+                            padding: "1rem",
+                            background: "#fef3c7",
+                            color: "#b45309",
+                            borderRadius: "8px",
+                            marginBottom: "1.5rem",
+                            border: "1px solid #fde68a",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "0.9rem",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          <AlertTriangle size={18} /> Map tracking is
+                          unavailable because no GPS pin was saved during
+                          checkout.
+                        </div>
+                      )}
+
+                    {currentStatus === "Out for Delivery" &&
+                      customerLat &&
+                      customerLng && (
+                        <div
+                          style={{
+                            marginBottom: "2rem",
+                            border: "2px solid #3b82f6",
+                            borderRadius: "8px",
+                            overflow: "hidden",
+                          }}
+                        >
+                          {/* --- NEW: ETA BANNER --- */}
+                          <div
+                            style={{
+                              background: "#eff6ff",
+                              padding: "10px 16px",
+                              borderBottom: "1px solid #bfdbfe",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                color: "#1d4ed8",
+                                fontWeight: "bold",
+                                fontSize: "0.85rem",
+                              }}
+                            >
+                              <Navigation size={18} /> Driver is on the way!
+                            </div>
+                            {estimatedMins && (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  background: "#dbeafe",
+                                  color: "#1e40af",
+                                  padding: "4px 12px",
+                                  borderRadius: "20px",
+                                  fontSize: "0.85rem",
+                                  fontWeight: "800",
+                                }}
+                              >
+                                <Clock size={14} /> Arriving in ~{estimatedMins}{" "}
+                                mins
+                              </div>
+                            )}
+                          </div>
+
+                          <div
+                            style={{
+                              height: "300px",
+                              width: "100%",
+                              position: "relative",
+                              zIndex: 1,
+                            }}
+                          >
+                            <MapContainer
+                              center={[
+                                parseFloat(customerLat),
+                                parseFloat(customerLng),
+                              ]}
+                              zoom={13}
+                              style={{ height: "100%", width: "100%" }}
+                            >
+                              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+                              <FitMapBounds
+                                coords={[
+                                  ...(driverLat && driverLng
+                                    ? [[driverLat, driverLng]]
+                                    : []),
+                                  [
+                                    parseFloat(customerLat),
+                                    parseFloat(customerLng),
+                                  ],
+                                  ...(trackingData && trackingData.stores
+                                    ? trackingData.stores.map((s) => [
+                                        s.lat,
+                                        s.lng,
+                                      ])
+                                    : []),
+                                ]}
+                              />
+
+                              <Marker
+                                position={[
+                                  parseFloat(customerLat),
+                                  parseFloat(customerLng),
+                                ]}
+                                icon={homeIcon}
+                              >
+                                <Popup>Your Dropoff Location</Popup>
+                              </Marker>
+
+                              {trackingData &&
+                                trackingData.stores &&
+                                trackingData.stores.map((store, i) => (
+                                  <Marker
+                                    key={i}
+                                    position={[store.lat, store.lng]}
+                                    icon={storeIcon}
+                                  >
+                                    <Popup>{store.name}</Popup>
+                                  </Marker>
+                                ))}
+
+                              {driverLat && driverLng && (
+                                <Marker
+                                  position={[driverLat, driverLng]}
+                                  icon={truckIcon}
+                                  zIndexOffset={1000}
+                                >
+                                  <Popup>Your Driver</Popup>
+                                </Marker>
+                              )}
+
+                              {driverLat && driverLng && streetRoute ? (
+                                <Polyline
+                                  key={`osrm-${batchKey}`}
+                                  positions={streetRoute}
+                                  color="#3b82f6"
+                                  weight={5}
+                                  opacity={0.8}
+                                />
+                              ) : (
+                                driverLat &&
+                                driverLng && (
+                                  <Polyline
+                                    key={`fallback-${batchKey}`}
+                                    positions={[
+                                      [driverLat, driverLng],
+                                      [
+                                        parseFloat(customerLat),
+                                        parseFloat(customerLng),
+                                      ],
+                                    ]}
+                                    color="#3b82f6"
+                                    dashArray="5, 10"
+                                    weight={3}
+                                    opacity={0.5}
+                                  />
+                                )
+                              )}
+                            </MapContainer>
+                          </div>
+                        </div>
+                      )}
+
                     <h4
                       style={{
                         margin: "0 0 1rem 0",
@@ -1084,7 +1422,6 @@ const Orders = () => {
                           </p>
                         </div>
 
-                        {/* --- THE FIX: RENDER ALL UPLOADED PACKING PHOTOS (MINI GALLERY) --- */}
                         {ordersWithPhotos.length > 0 && (
                           <div
                             style={{
@@ -1138,7 +1475,7 @@ const Orders = () => {
                                       gap: "4px",
                                     }}
                                   >
-                                    <Store size={12} color="var(--primary)" />
+                                    <Store size={12} color="var(--primary)" />{" "}
                                     {o.store_name}
                                   </p>
                                   <img
@@ -1157,52 +1494,6 @@ const Orders = () => {
                             </div>
                           </div>
                         )}
-
-                        {/* --- RENDER PROOF OF DELIVERY --- */}
-                        {currentStatus === "Delivered" && deliveryProof && (
-                          <div
-                            style={{
-                              marginTop: "1.5rem",
-                              paddingTop: "1.5rem",
-                              borderTop: "1px solid var(--border)",
-                            }}
-                          >
-                            <p
-                              style={{
-                                margin: "0 0 12px 0",
-                                fontSize: "0.8rem",
-                                color: "var(--text-muted)",
-                                textTransform: "uppercase",
-                                fontWeight: "700",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
-                              }}
-                            >
-                              <CheckCircle2 size={14} color="#10b981" /> Proof
-                              of Delivery:
-                            </p>
-                            <div
-                              style={{
-                                padding: "4px",
-                                border: "2px solid #10b981",
-                                background: "white",
-                                borderRadius: "6px",
-                              }}
-                            >
-                              <img
-                                src={deliveryProof}
-                                alt="Proof of Delivery"
-                                style={{
-                                  width: "100%",
-                                  height: "auto",
-                                  borderRadius: "4px",
-                                  display: "block",
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -1212,17 +1503,6 @@ const Orders = () => {
           })}
         </div>
       )}
-
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `
-        @keyframes fadeIn {
-          from { top: 0; opacity: 0; }
-          to { top: 20px; opacity: 1; }
-        }
-      `,
-        }}
-      />
     </div>
   );
 };

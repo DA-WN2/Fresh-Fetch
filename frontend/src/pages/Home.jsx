@@ -1,14 +1,22 @@
 import React, { useState, useMemo, useEffect } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { Store, ShoppingBag, CheckCircle2, Eye } from "lucide-react";
+import {
+  Store,
+  ShoppingBag,
+  CheckCircle2,
+  Eye,
+  AlertTriangle,
+} from "lucide-react";
 import "../styles/Marketplace.css";
 
 const Home = ({ addToCart, cart, clearCart }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [notification, setNotification] = useState("");
+
+  // UPGRADED: Notification now handles both text and type (success/error)
+  const [notification, setNotification] = useState({ text: "", type: "" });
   const navigate = useNavigate();
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -22,6 +30,7 @@ const Home = ({ addToCart, cart, clearCart }) => {
         setLoading(false);
       } catch (err) {
         console.error("Failed to load products", err);
+        showNotification("Failed to load products. Please refresh.", "error");
         setLoading(false);
       }
     };
@@ -50,12 +59,13 @@ const Home = ({ addToCart, cart, clearCart }) => {
 
   const handleAdd = (product) => {
     addToCart(product);
-    showNotification(`${product.name} added to cart!`);
+    showNotification(`${product.name} added to cart!`, "success");
   };
 
-  const showNotification = (msg) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(""), 3000);
+  // UPGRADED: Friendly UI notification function instead of alert()
+  const showNotification = (text, type = "success") => {
+    setNotification({ text, type });
+    setTimeout(() => setNotification({ text: "", type: "" }), 3000);
   };
 
   const cartTotal = cart.reduce(
@@ -64,45 +74,23 @@ const Home = ({ addToCart, cart, clearCart }) => {
     0,
   );
 
-  const handleCheckout = async () => {
+  // THE FIX: Simply route to the checkout page!
+  const handleCheckoutRoute = () => {
     const token = localStorage.getItem("token");
     if (!token) {
-      navigate("/login");
+      showNotification("Please login to proceed to checkout.", "error");
+      setTimeout(() => navigate("/login"), 1500);
       return;
     }
 
-    const payload = {
-      cart_items: cart.map((item) => ({
-        product_id: item.product.id,
-        quantity: item.quantity,
-      })),
-    };
-
-    try {
-      const res = await axios.post(
-        "http://127.0.0.1:8000/api/customer/checkout/",
-        payload,
-        {
-          headers: { Authorization: `Token ${token}` },
-        },
-      );
-
-      clearCart();
-      setIsCartOpen(false);
-      showNotification(
-        `Success! ${res.data.store_orders_generated} branch orders placed.`,
-      );
-
-      const refreshRes = await axios.get("http://127.0.0.1:8000/api/products/");
-      setProducts(refreshRes.data);
-    } catch (err) {
-      alert(err.response?.data?.error || "Checkout failed.");
-    }
+    // Close the cart modal and send them to the new checkout screen
+    setIsCartOpen(false);
+    navigate("/checkout");
   };
 
   return (
     <>
-      {/* FLOATING CART BUTTON - Now strictly uses Deep Teal */}
+      {/* FLOATING CART BUTTON */}
       <div
         style={{
           position: "fixed",
@@ -134,26 +122,34 @@ const Home = ({ addToCart, cart, clearCart }) => {
         </button>
       </div>
 
-      {/* NOTIFICATION POPUP */}
-      {notification && (
+      {/* UPGRADED NOTIFICATION POPUP */}
+      {notification.text && (
         <div
           style={{
             position: "fixed",
             top: "90px",
             right: "32px",
-            background: "var(--primary)",
+            background:
+              notification.type === "error"
+                ? "var(--danger)"
+                : "var(--primary)",
             color: "white",
             padding: "12px 24px",
             borderRadius: "8px",
             fontWeight: "bold",
-            zIndex: 2000,
+            zIndex: 4000,
             boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)",
             display: "flex",
             alignItems: "center",
             gap: "8px",
           }}
         >
-          <CheckCircle2 size={18} /> {notification}
+          {notification.type === "error" ? (
+            <AlertTriangle size={18} />
+          ) : (
+            <CheckCircle2 size={18} />
+          )}
+          {notification.text}
         </div>
       )}
 
@@ -188,7 +184,6 @@ const Home = ({ addToCart, cart, clearCart }) => {
             <div className="product-grid">
               {deals.map((item) => (
                 <div key={item.id} className="card deal-card">
-                  {/* FIXED LAYOUT: Badge stacked cleanly above the Store Name */}
                   <div
                     style={{
                       display: "flex",
@@ -431,7 +426,7 @@ const Home = ({ addToCart, cart, clearCart }) => {
                 <span>₹{cartTotal.toFixed(2)}</span>
               </div>
               <button
-                onClick={handleCheckout}
+                onClick={handleCheckoutRoute} // <-- THE NEW FUNCTION
                 style={{
                   width: "100%",
                   padding: "16px",

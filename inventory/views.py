@@ -10,13 +10,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.parsers import JSONParser
-from django.utils import timezone
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from datetime import timedelta
+from .models import CustomerAddress
 
 # Model and Serializer imports
-from .models import Product, Order, OrderItem, Store, WasteLog, Supplier, RestockOrder, Category
+from .models import Product, Order, OrderItem, Store, WasteLog, Supplier, RestockOrder, Category, AgentLocation
 from .serializers import ProductSerializer
 
 # --- CUSTOMER VIEWS ---
@@ -32,9 +31,7 @@ class ProductList(generics.ListAPIView):
 
 class CustomerCheckoutView(APIView):
     """
-    USE CASE: Multi-Vendor Checkout Splitter.
-    Takes 1 customer cart, splits it into multiple store-specific orders, 
-    and returns 1 combined bill.
+    USE CASE: Multi-Vendor Checkout Splitter with GPS Capture.
     """
     permission_classes = [IsAuthenticated]
 
@@ -42,11 +39,12 @@ class CustomerCheckoutView(APIView):
         if getattr(request.user, 'role', '') == 'manager':
             return Response({"error": "Managers cannot place customer orders."}, status=status.HTTP_403_FORBIDDEN)
 
-        # Expected payload: {"cart_items": [{"product_id": 1, "quantity": 2}], "delivery_address": "123 Main St"}
         cart_items = request.data.get('cart_items', [])
-        
-        # Extract the delivery address sent from React Checkout.jsx
         delivery_address = request.data.get('delivery_address', 'Address not provided')
+        
+        # --- Capture exact GPS coordinates sent from React ---
+        delivery_lat = request.data.get('delivery_lat')
+        delivery_lng = request.data.get('delivery_lng')
 
         if not cart_items:
             return Response({"error": "Your cart is empty."}, status=status.HTTP_400_BAD_REQUEST)
@@ -61,7 +59,7 @@ class CustomerCheckoutView(APIView):
             with transaction.atomic():
                 # 1. Verify Stock & Group items by Store
                 for item in cart_items:
-                    # select_for_update prevents race conditions (no double-selling last item)
+                    # select_for_update prevents race conditions
                     product = Product.objects.select_for_update().get(id=item['product_id'])
                     qty = int(item['quantity'])
 
@@ -78,13 +76,14 @@ class CustomerCheckoutView(APIView):
                 created_order_ids = []
                 for store, items in store_item_map.items():
                     
-                    # Pass the delivery_address to the database
                     order = Order.objects.create(
                         store=store,
                         user=request.user,
                         delivery_address=delivery_address, 
+                        delivery_lat=delivery_lat,
+                        delivery_lng=delivery_lng,
                         status="Pending",
-                        batch_id=current_batch_id # Attach the batch ID to link these orders!
+                        batch_id=current_batch_id 
                     )
                     created_order_ids.append(order.id)
 
@@ -108,7 +107,6 @@ class CustomerCheckoutView(APIView):
                         # Add to the customer's combined bill
                         grand_total += (price * qty)
 
-            # 3. Return a single response for the React Frontend
             return Response({
                 "message": "Checkout successful!",
                 "grand_total": str(grand_total),
@@ -135,7 +133,9 @@ class ManagerStoreProfileView(APIView):
             return Response({
                 "id": store.id,
                 "name": store.name,
-                "address": getattr(store, 'address', '')
+                "address": getattr(store, 'address', ''),
+                "latitude": getattr(store, 'latitude', None),
+                "longitude": getattr(store, 'longitude', None)
             })
         except Exception:
             return Response({"error": "No store assigned."}, status=status.HTTP_400_BAD_REQUEST)
@@ -146,9 +146,19 @@ class ManagerStoreProfileView(APIView):
         
         try:
             store = request.user.managed_store
+            
             new_address = request.data.get('address')
+            lat = request.data.get('latitude')
+            lng = request.data.get('longitude')
+            
             if new_address is not None:
                 store.address = new_address
+                
+                # Save exact GPS if provided
+                if lat and lng:
+                    store.latitude = float(lat)
+                    store.longitude = float(lng)
+                    
                 store.save()
                 return Response({"message": "Store pickup address updated successfully!"})
             return Response({"error": "No address provided."}, status=status.HTTP_400_BAD_REQUEST)
@@ -157,7 +167,6 @@ class ManagerStoreProfileView(APIView):
 
 class ManagerInventoryView(APIView):
     """Fetches inventory strictly for the manager's assigned store AND allows creating new products."""
-    
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -174,7 +183,6 @@ class ManagerInventoryView(APIView):
         
         data = []
         for p in products:
-            # Evaluate the exact status based on the date
             if p.expiry_date < today:
                 expiry_status = "Expired"
             elif p.is_near_expiry:
@@ -203,7 +211,6 @@ class ManagerInventoryView(APIView):
         return Response(data)
 
     def post(self, request):
-        """CREATE a new product for this branch"""
         if getattr(request.user, 'role', '') != 'manager':
             return Response({"error": "Access Denied."}, status=status.HTTP_403_FORBIDDEN)
         
@@ -233,7 +240,6 @@ class ManagerInventoryView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class ManagerProductDetailView(APIView):
-    """USE CASE: Edit (PUT) or Delete (DELETE) a specific product"""
     permission_classes = [IsAuthenticated]
 
     def put(self, request, pk):
@@ -269,7 +275,6 @@ class ManagerProductDetailView(APIView):
 # --- MANAGER: FULFILLMENT & LOGISTICS ---
 
 class ManagerOrdersView(APIView):
-    """USE CASE: Fulfillment Queue."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -302,7 +307,6 @@ class ManagerOrdersView(APIView):
         return Response(data)
 
 class UpdateOrderStatusView(APIView):
-    """USE CASE: Manager Fulfillment. Prevents shipping without a photo validation."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, order_id):
@@ -328,7 +332,6 @@ class UpdateOrderStatusView(APIView):
             return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class UploadPackingPhotoView(APIView):
-    """USE CASE: Manager Fulfillment. Uploads the snapshot before shipping."""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
 
@@ -362,7 +365,6 @@ class UploadPackingPhotoView(APIView):
 # --- MANAGER: ADVANCED ERP UTILITIES ---
 
 class RunPricingEngineView(APIView):
-    """USE CASE: Smart Shelf Management. Discounts near-expiry & Removals expired."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -379,12 +381,10 @@ class RunPricingEngineView(APIView):
                 for product in products:
                     days_to_expiry = (product.expiry_date - timezone.now().date()).days
                     
-                    # LOGIC A: ITEM HAS EXPIRED
                     if days_to_expiry < 0 and product.stock_quantity > 0:
                         qty_to_remove = product.stock_quantity
                         expired_list.append(f"{product.name} ({qty_to_remove} units)")
                         
-                        # 1. Log to Sustainability/Waste Log
                         WasteLog.objects.create(
                             product_name=product.name,
                             store=store,
@@ -393,11 +393,8 @@ class RunPricingEngineView(APIView):
                             financial_loss=qty_to_remove * product.original_price,
                             carbon_footprint_est=qty_to_remove * 0.45
                         )
-                        # 2. Remove from online store (Zero stock)
                         product.stock_quantity = 0
                         product.save()
-
-                    # LOGIC B: ITEM IS NEAR EXPIRY (Discount it)
                     else:
                         product.check_and_update_smart_pricing()
                         if product.is_near_expiry:
@@ -412,7 +409,6 @@ class RunPricingEngineView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class ReportAuditView(APIView):
-    """USE CASE: Physical Stock Audit. Logs shrinkage/theft to WasteLog."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -455,7 +451,6 @@ class ReportAuditView(APIView):
             return Response({"error": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class TriggerRestockView(APIView):
-    """Allows Manager to order custom quantities from specific suppliers with a Target Date."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -501,7 +496,6 @@ class TriggerRestockView(APIView):
 # --- MANAGER: ANALYTICS ---
 
 class EnvironmentalImpactView(APIView):
-    """USE CASE: Sustainability Dashboard data."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -528,7 +522,6 @@ class EnvironmentalImpactView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class SupplierScoresView(APIView):
-    """Fetches real suppliers from the database for the manager dashboard dropdown."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -549,7 +542,6 @@ class SupplierScoresView(APIView):
         return Response(data, status=status.HTTP_200_OK)
 
 class SupplierReliabilityView(APIView):
-    """Legacy View - you can use either this one or SupplierScoresView."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -571,13 +563,11 @@ class SupplierReliabilityView(APIView):
     
 
 class ProductDetailView(generics.RetrieveAPIView):
-    """Fetches full details for a single product."""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
 
 
 class WasteReportView(APIView):
-    """USE CASE: Detailed history of all expired stock for audit/reporting."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -586,7 +576,6 @@ class WasteReportView(APIView):
         
         try:
             store = request.user.managed_store
-            # Fetch all 'Expired' logs, most recent first
             logs = WasteLog.objects.filter(store=store, reason='Expired').order_by('-timestamp')
             
             data = [{
@@ -613,6 +602,7 @@ class CustomerOrderHistoryView(APIView):
         order_data = []
         for order in orders:
             items = OrderItem.objects.filter(order=order)
+            
             item_list = []
             order_total = 0 
             
@@ -627,9 +617,7 @@ class CustomerOrderHistoryView(APIView):
             
             order_data.append({
                 "id": order.id,
-                # --- THE FIX: SEND BATCH ID TO CUSTOMER UI FOR GROUPING ---
                 "batch_id": getattr(order, 'batch_id', None) or str(order.id),
-                
                 "store_name": order.store.name if order.store else "FreshFetch Fulfillment",
                 "status": order.status,
                 "total_price": str(round(order_total, 2)), 
@@ -638,7 +626,7 @@ class CustomerOrderHistoryView(APIView):
                 "is_transferred": order.is_transferred,
                 "transferred_by": order.transferred_by, 
                 "packing_photo": request.build_absolute_uri(order.packing_photo.url) if order.packing_photo else None,
-                "delivery_photo": request.build_absolute_uri(order.delivery_photo.url) if order.delivery_photo else None, # ADDED DELIVERY PHOTO HERE!
+                "delivery_photo": request.build_absolute_uri(order.delivery_photo.url) if order.delivery_photo else None, 
                 "items": item_list
             })
             
@@ -646,9 +634,6 @@ class CustomerOrderHistoryView(APIView):
     
 
 class TransferOrderView(APIView):
-    """
-    Use Case: Third-Party Access.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request, order_id):
@@ -693,11 +678,9 @@ class TransferOrderView(APIView):
 # --- DELIVERY AGENT VIEWS ---
 
 class DeliveryOrdersView(APIView):
-    """Fetches orders that are waiting to be delivered or currently in transit."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # --- THE FIX: Fetch ALL active orders assigned to the driver, including Pending! ---
         orders = Order.objects.filter(
             delivery_agent=request.user
         ).exclude(status__in=['Cancelled', 'Delivered']).order_by('created_at')
@@ -722,7 +705,6 @@ class DeliveryOrdersView(APIView):
 
 
 class DeliveryUpdateStatusView(APIView):
-    """Allows the delivery agent to update the delivery pipeline and upload proof."""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser, JSONParser)
 
@@ -734,7 +716,6 @@ class DeliveryUpdateStatusView(APIView):
             if new_status in ['Out for Delivery', 'Delivered']:
                 order.status = new_status
 
-                # If delivered, save the proof photo
                 if new_status == 'Delivered':
                     photo = request.FILES.get('image')
                     if photo:
@@ -749,7 +730,6 @@ class DeliveryUpdateStatusView(APIView):
             return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
         
 class AvailableDeliveryAgentsView(APIView):
-    """Dynamically calculates which agents are free and which are busy."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -769,7 +749,6 @@ class AvailableDeliveryAgentsView(APIView):
 
 
 class AssignDeliveryAgentView(APIView):
-    """Allows the manager to assign an available driver. SYNCs to the whole cart batch!"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, order_id):
@@ -802,7 +781,6 @@ class AssignDeliveryAgentView(APIView):
 # --- SUPPLIER / B2B VIEWS ---
 
 class SupplierRestockOrdersView(APIView):
-    """Fetches incoming wholesale requests for the logged-in Supplier."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -828,7 +806,6 @@ class SupplierRestockOrdersView(APIView):
         return Response(data)
 
 class UpdateRestockOrderStatusView(APIView):
-    """Allows the Supplier to update the shipment status. Auto-adds to store inventory when Delivered!"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, order_id):
@@ -922,3 +899,123 @@ class EvaluateSupplierView(APIView):
             return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =========================================================
+# --- LIVE TRACKING APIs ---
+# =========================================================
+
+class UpdateAgentLocationView(APIView):
+    """Called continuously by the Delivery Agent's device to broadcast GPS."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if getattr(request.user, 'role', '') not in ['delivery', 'delivery_agent']:
+            return Response({"error": "Unauthorized"}, status=status.HTTP_403_FORBIDDEN)
+        
+        lat = request.data.get('lat')
+        lng = request.data.get('lng')
+
+        if lat and lng:
+            loc, created = AgentLocation.objects.get_or_create(agent=request.user, defaults={'latitude': lat, 'longitude': lng})
+            if not created:
+                loc.latitude = lat
+                loc.longitude = lng
+                loc.save()
+            return Response({"status": "Location updated!"})
+        return Response({"error": "Invalid coordinates"}, status=status.HTTP_400_BAD_REQUEST)
+
+class TrackOrderView(APIView):
+    """Called by the Customer and Driver UI to fetch all map coordinates."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, batch_id):
+        orders = Order.objects.filter(batch_id=batch_id)
+        if not orders.exists():
+            return Response({"error": "Route not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # 1. Get Agent Location
+        agent = orders.first().delivery_agent
+        agent_loc = None
+        if agent and hasattr(agent, 'live_location'):
+            agent_loc = {
+                "lat": agent.live_location.latitude,
+                "lng": agent.live_location.longitude,
+                "updated_at": agent.live_location.last_updated
+            }
+
+        # 2. Get Stores (Pickups)
+        stores = []
+        for o in orders:
+            stores.append({
+                "id": o.store.id if o.store else 0,
+                "name": o.store.name if o.store else "Warehouse",
+                "lat": o.store.latitude or 9.5785, 
+                "lng": o.store.longitude or 76.6180
+            })
+
+        # 3. Get Customer (Dropoff)
+        customer_loc = {
+            "lat": orders.first().delivery_lat or 9.5810, 
+            "lng": orders.first().delivery_lng or 76.6200
+        }
+
+        return Response({
+            "agent": agent_loc,
+            "stores": stores,
+            "customer": customer_loc,
+            "status": orders.first().status
+        })
+    
+
+
+class CustomerAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        addresses = CustomerAddress.objects.filter(user=request.user).order_by('-is_default', '-id')
+        data = [{
+            "id": addr.id,
+            "label": addr.label,
+            "full_address": addr.full_address,
+            "latitude": addr.latitude,
+            "longitude": addr.longitude,
+            "is_default": addr.is_default
+        } for addr in addresses]
+        return Response(data)
+
+    def post(self, request):
+        label = request.data.get('label')
+        full_address = request.data.get('full_address')
+        lat = request.data.get('latitude')
+        lng = request.data.get('longitude')
+        is_default = request.data.get('is_default', False)
+
+        if not all([label, full_address, lat, lng]):
+            return Response({"error": "All fields including GPS coordinates are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # If this is the first address or set to default, unset other defaults
+        if is_default or not CustomerAddress.objects.filter(user=request.user).exists():
+            CustomerAddress.objects.filter(user=request.user).update(is_default=False)
+            is_default = True
+
+        address = CustomerAddress.objects.create(
+            user=request.user,
+            label=label,
+            full_address=full_address,
+            latitude=lat,
+            longitude=lng,
+            is_default=is_default
+        )
+        return Response({"message": f"{label} address saved successfully!", "id": address.id}, status=status.HTTP_201_CREATED)
+
+class DeleteCustomerAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        try:
+            address = CustomerAddress.objects.get(id=pk, user=request.user)
+            address.delete()
+            return Response({"message": "Address deleted."})
+        except CustomerAddress.DoesNotExist:
+            return Response({"error": "Address not found."}, status=status.HTTP_404_NOT_FOUND)

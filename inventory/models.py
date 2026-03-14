@@ -15,6 +15,11 @@ class Store(models.Model):
         related_name='managed_store'
     )
     address = models.TextField(blank=True, null=True, help_text="Store Pickup Address for Delivery Agents")
+    
+    # NEW: Store Coordinates for Live Tracking
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -30,9 +35,7 @@ class Category(models.Model):
 
 # --- 3. SUPPLIER RELIABILITY ---
 class Supplier(models.Model):
-    # --- ADD THIS LINE so a supplier can log in! ---
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='supplier_profile')
-    
     name = models.CharField(max_length=255)
     contact_email = models.EmailField(blank=True, null=True)
     reliability_score = models.FloatField(default=10.0)
@@ -56,7 +59,6 @@ class Product(models.Model):
     def __str__(self):
         return f"{self.name} - {self.store.name if self.store else 'No Store'}"
 
-    # NEW: Logic for stock status (Fixes AttributeError in Admin and API)
     @property
     def stock_status(self):
         """Dynamically calculates the stock status for the Admin Panel and API."""
@@ -78,8 +80,7 @@ class Product(models.Model):
             self.current_price = self.original_price
         self.save()
 
-# --- 5. ORDERS & LOGISTICS ---
-# --- 5. ORDERS & LOGISTICS ---
+
 # --- 5. ORDERS & LOGISTICS ---
 class Order(models.Model):
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='orders', null=True)
@@ -88,13 +89,17 @@ class Order(models.Model):
     delivery_photo = models.ImageField(upload_to='delivery_photos/', blank=True, null=True)
     batch_id = models.CharField(max_length=100, blank=True, null=True, help_text="Groups multi-store orders from a single checkout")
 
-    delivery_agent = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='assigned_deliveries', on_delete=models.SET_NULL, null=True, blank=True)#new
+    delivery_agent = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='assigned_deliveries', on_delete=models.SET_NULL, null=True, blank=True)
     delivery_address = models.TextField(blank=True, null=True) 
+    
+    # NEW: Customer Dropoff Coordinates for Live Tracking
+    delivery_lat = models.FloatField(null=True, blank=True)
+    delivery_lng = models.FloatField(null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     is_express = models.BooleanField(default=False) 
     
     is_transferred = models.BooleanField(default=False) 
-    # NEW: Store the username of the person who sent it!
     transferred_by = models.CharField(max_length=150, blank=True, null=True) 
     
     status = models.CharField(max_length=20, default="Pending") 
@@ -105,6 +110,7 @@ class OrderItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
     price_at_purchase = models.DecimalField(max_digits=10, decimal_places=2)
+
 
 # --- 6. ERP LOGGING ---
 class WasteLog(models.Model):
@@ -130,3 +136,28 @@ class RestockOrder(models.Model):
     quality_received = models.IntegerField(choices=[(i, i) for i in range(1, 6)], null=True, blank=True)
     is_completed = models.BooleanField(default=False)
     status = models.CharField(max_length=20, default="Pending")
+
+
+# --- 7. LIVE TRACKING ---
+class AgentLocation(models.Model):
+    """Stores the live GPS coordinates broadcasted by the Delivery Agent's device"""
+    agent = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='live_location')
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.agent.username} - {self.latitude}, {self.longitude}"
+
+
+#customer profile
+class CustomerAddress(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='saved_addresses')
+    label = models.CharField(max_length=50) # e.g., "Home", "Work", "College"
+    full_address = models.TextField()
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    is_default = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.label}"
